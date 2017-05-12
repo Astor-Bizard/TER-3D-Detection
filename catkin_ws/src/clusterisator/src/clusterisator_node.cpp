@@ -19,24 +19,8 @@
 #define CLUSTER_THRESHOLD 100
 #define MAX_CLUSTERS_NB 65535
 
+#define DO_OPTI true
 #define T_OPTI 5 // taille du carré d'optimisation
-
-ros::Publisher clusters_publisher;
-ros::Publisher image_opti_publisher;
-ros::Publisher person_publisher;
-
-/*
-
-Format des données recues par openni_node :
-uint8_t data[size], avec size = h*step = h*w*2
-
-Interpretation : données sur 16bits, donc sur 2 cases du tableau
-
-[[(bits 8->15)] [(bits 0->7)]]
-
--> uint16_t depth[i,j] = (data[i*w*2 + j*2 + 1] << 8) + data[i*w*2 + j*2];
-
-*/
 
 uint32_t max2(uint32_t a, uint32_t b){
 	return a>b ? a : b;
@@ -51,6 +35,64 @@ uint32_t min3(uint32_t a, uint32_t b, uint32_t c){
 	return min2(min2(a,b),c);
 }
 
+
+class Clusterisator {
+
+private:
+ros::Subscriber img_sub;
+
+ros::Publisher clusters_publisher;
+#if DO_OPTI
+ros::Publisher image_opti_publisher;
+#endif
+ros::Publisher person_publisher;
+
+std::vector<uint16_t> background;
+
+bool first_pass;
+
+struct cluster_t{
+	int size;
+	int min_i;
+	int max_i;
+	int min_j;
+	int max_j;
+};
+struct cluster_t clusters[MAX_CLUSTERS_NB];
+
+/*
+
+Format des données recues par openni_node :
+uint8_t data[size], avec size = h*step = h*w*2
+
+Interpretation : données sur 16bits, donc sur 2 cases du tableau
+
+[[(bits 8->15)] [(bits 0->7)]]
+
+-> uint16_t depth[i,j] = (data[i*w*2 + j*2 + 1] << 8) + data[i*w*2 + j*2];
+
+*/
+
+
+public:
+
+Clusterisator(){
+
+	ros::NodeHandle nh;
+
+	clusters_publisher = nh.advertise<sensor_msgs::Image>(CLUSTERS_TOPIC, 5);
+#if DO_OPTI
+	image_opti_publisher = nh.advertise<sensor_msgs::Image>(IMAGE_OPTI_TOPIC, 5);
+#endif
+	person_publisher = nh.advertise<sensor_msgs::Image>(PERSON_TOPIC, 5);
+
+	img_sub = nh.subscribe(CAMERA_DEPTH_TOPIC, 5, &Clusterisator::depthImageCallback, this);
+	
+	first_pass = true;
+}
+
+
+#if DO_OPTI
 // Publish the computed optimized data
 void publish_data_opti(uint16_t data[], uint32_t h, uint32_t w, const sensor_msgs::Image::ConstPtr& img){
 	sensor_msgs::Image opti_img;
@@ -71,10 +113,12 @@ void publish_data_opti(uint16_t data[], uint32_t h, uint32_t w, const sensor_msg
 	
 	image_opti_publisher.publish(opti_img);
 }
+#endif
+
 
 // Compute and publish persons detected
 void publish_person(uint16_t cluster_num[], uint32_t h, uint32_t w, uint16_t n,
-					int cluster_min_i[], int cluster_max_i[], int cluster_min_j[], int cluster_max_j[]){
+					struct cluster_t clusters[]){
 	sensor_msgs::Image person;
 	person.header.stamp = ros::Time::now();
 	person.header.frame_id = PERSON_FRAME_ID;
@@ -93,8 +137,8 @@ void publish_person(uint16_t cluster_num[], uint32_t h, uint32_t w, uint16_t n,
 	for(i=0; i<h; i++){
 		for(j=0; j<w; j++){
 			uint16_t c_n = cluster_num[i*w+j];
-			int c_height = cluster_max_i[c_n] - cluster_min_i[c_n] + 1;
-			int c_width = cluster_max_j[c_n] - cluster_min_j[c_n] + 1;
+			int c_height = clusters[c_n].max_i - clusters[c_n].min_i + 1;
+			int c_width = clusters[c_n].max_j - clusters[c_n].min_j + 1;
 			if(c_width > 10 && c_width < 50 && c_height > 60){
 				if(cluster_person[c_n] == 0){
 					cluster_person[c_n] = 1;
@@ -114,13 +158,16 @@ void publish_person(uint16_t cluster_num[], uint32_t h, uint32_t w, uint16_t n,
 	person_publisher.publish(person);
 }
 
-void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_pass){
 
+void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
+
+	uint32_t i,j;
+	
+#if DO_OPTI
 	static const uint32_t h = img->height/T_OPTI;
 	static const uint32_t w = img->width/T_OPTI;
 	// Pretraitement d'optimisation : reduction de la taille de data
 	uint16_t data[h*w];
-	uint32_t i,j;
 	for(i=0; i<h; i++){
 		for(j=0; j<w; j++){
 			uint32_t x,y;
@@ -131,29 +178,50 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_
 	}
 	
 	publish_data_opti(data,h,w,img);
+#else
+	static const uint32_t h = img->height;
+	static const uint32_t w = img->width;
+	uint16_t data[h*w];
+	for(i=0; i<h; i++){
+		for(j=0; j<w; j++){
+			data[i*w+j] = (img->data[i*w*2 + j*2 + 1] << 8) + img->data[i*w*2 + j*2];
+		}
+	}
+#endif
 	
-	static std::vector<uint16_t> background;
 	if(first_pass){
+		first_pass = false;
 		for(i=0; i<h; i++)
 			for(j=0; j<w; j++)
 				background.push_back(data[i*w+j]);
+				
+		/*
+		// Suppression du bruit dans le background
+		for(i=1;i<h-1;i++)
+			for(j=1;j<w-1;j++)
+				// Si le pixel est différent de tous ses voisins, c'est du bruit
+				if(	  abs(background[i*w+j] - background[i*w+j-1]) < CLUSTER_THRESHOLD
+				   && abs(background[i*w+j] - background[i*w+j+1]) < CLUSTER_THRESHOLD
+				   && abs(background[i*w+j] - background[(i-1)*w+j]) < CLUSTER_THRESHOLD
+				   && abs(background[i*w+j] - background[(i+1)*w+j]) < CLUSTER_THRESHOLD){
+
+				 		background[i*w+j] = background[i*w+j-1];
+				}
+		*/
 	}
 	
 	#define NEW_CLUSTER(INDEX_I,INDEX_J) n++;\
 										 nb_clusters++;\
 										 cluster_num[INDEX_I*w+INDEX_J] = n;\
-										 cluster_size[n] = 1;\
-										 cluster_min_i[n]=INDEX_I;\
-										 cluster_max_i[n]=INDEX_I;\
-										 cluster_min_j[n]=INDEX_J;\
-										 cluster_max_j[n]=INDEX_J;
+										 clusters[n].size = 1;\
+										 clusters[n].min_i = INDEX_I;\
+										 clusters[n].max_i = INDEX_I;\
+										 clusters[n].min_j = INDEX_J;\
+										 clusters[n].max_j = INDEX_J;\
+										 
 	
 	uint16_t cluster_num[h*w];
-	int cluster_size[MAX_CLUSTERS_NB];
-	int cluster_min_i[MAX_CLUSTERS_NB];
-	int cluster_max_i[MAX_CLUSTERS_NB];
-	int cluster_min_j[MAX_CLUSTERS_NB];
-	int cluster_max_j[MAX_CLUSTERS_NB];
+	
 	uint16_t x,y;
 	uint16_t nb_clusters=0;
 	uint16_t n = 0;
@@ -162,9 +230,9 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_
 		if(abs(data[i*w] - data[(i-1)*w]) < CLUSTER_THRESHOLD){
 			x = cluster_num[(i-1)*w];
 			cluster_num[i*w] = x;
-			cluster_size[x] ++;
-			if(cluster_max_i[x] < i)
-				cluster_max_i[x] = i;
+			clusters[x].size ++;
+			if(clusters[x].max_i < i)
+				clusters[x].max_i = i;
 		}
 		else{
 			NEW_CLUSTER(i,0);
@@ -174,9 +242,9 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_
 		if(abs(data[j] - data[j-1]) < CLUSTER_THRESHOLD){
 			y = cluster_num[j-1];
 			cluster_num[j] = y;
-			cluster_size[y] ++;
-			if(cluster_max_j[y] < j)
-				cluster_max_j[y] = j;
+			clusters[y].size ++;
+			if(clusters[y].max_j < j)
+				clusters[y].max_j = j;
 		}
 		else{
 			NEW_CLUSTER(0,j);
@@ -193,7 +261,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_
 					// top & left
 					if(x != y){
 						uint16_t small,big;
-						if(cluster_size[x] < cluster_size[y]){
+						if(clusters[x].size < clusters[y].size){
 							small = x;
 							big = y;
 						}
@@ -208,37 +276,39 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_
 								if(cluster_num[i2*w+j2]==small)
 									cluster_num[i2*w+j2]=big;
 						
-						cluster_size[big] += cluster_size[small] + 1;
 						cluster_num[i*w+j] = big;
 						nb_clusters--;
-						cluster_min_i[big] = min3(cluster_min_i[big],cluster_min_i[small],i);
-						cluster_min_j[big] = min3(cluster_min_j[big],cluster_min_j[small],j);
-						cluster_max_i[big] = max3(cluster_max_i[big],cluster_max_i[small],i);
-						cluster_max_j[big] = max3(cluster_max_j[big],cluster_max_j[small],j);
+						clusters[big].size += clusters[small].size + 1;
+						clusters[big].min_i = min3(clusters[big].min_i,clusters[small].min_i,i);
+						clusters[big].min_j = min3(clusters[big].min_j,clusters[small].min_j,j);
+						clusters[big].max_i = max3(clusters[big].max_i,clusters[small].max_i,i);
+						clusters[big].max_j = max3(clusters[big].max_j,clusters[small].max_j,j);
 					}
 					else{ // x=y
 						cluster_num[i*w+j] = x;
-						cluster_size[x] ++;
-						if(cluster_max_i[x] < i)
-							cluster_max_i[x] = i;
-						if(cluster_max_j[y] < j)
-							cluster_max_j[y] = j;
+						clusters[x].size ++;
+						if(clusters[x].max_i < i)
+							clusters[x].max_i = i;
+						if(clusters[y].max_j < j)
+							clusters[y].max_j = j;
+						
 					}
 				}
 				else{
 					// top & !left
 					cluster_num[i*w+j] = x;
-					cluster_size[x] ++;
-					if(cluster_max_i[x] < i)
-						cluster_max_i[x] = i;
+					clusters[x].size ++;
+					if(clusters[x].max_i < i)
+						clusters[x].max_i = i;
 				}
 			}
 			else if(next_to_left){
 				// !top & left
 				cluster_num[i*w+j] = y;
-				cluster_size[y] ++;
-				if(cluster_max_j[y] < j)
-					cluster_max_j[y] = j;
+				clusters[y].size ++;
+				if(clusters[y].max_j < j)
+					clusters[y].max_j = j;
+				
 			}
 			else{
 				// !top & !left
@@ -247,16 +317,17 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_
 		}
 	}
 	
-	
+	/*
 	// Suppression du bruit
 	for(i=1;i<h-1;i++)
 		for(j=1;j<w-1;j++)
-			// Si le pixel est différent de tous les pixels adjacents, c'est un cluster d'1 pixel : il est considéré comme du bruit.
+			// Si c'est un cluster d'1 pixel, il est considéré comme du bruit.
 			if(cluster_num[i*w+j] != cluster_num[i*w+j-1] && cluster_num[i*w+j] != cluster_num[i*w+j+1] &&
 			   cluster_num[i*w+j] != cluster_num[(i+1)*w+j] && cluster_num[i*w+j] != cluster_num[(i-1)*w+j]){
 			 		cluster_num[i*w+j] = cluster_num[i*w+j-1];
 					nb_clusters--;
 			}
+	*/
 	
 	sensor_msgs::Image clst;
 	clst.header.stamp = ros::Time::now();
@@ -275,26 +346,22 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img, bool first_
 	}
 	clusters_publisher.publish(clst);
 	
-	publish_person(cluster_num,h,w,n,cluster_min_i,cluster_max_i,cluster_min_j,cluster_max_j);
+	publish_person(cluster_num,h,w,n,clusters);
 }
 
+
 void depthImageCallback(const sensor_msgs::Image::ConstPtr& img){
-	static bool first_pass=true;
-	compute_clusterisation(img,first_pass);
-	first_pass=false;
+	compute_clusterisation(img);
 }
+
+};
+
 
 int main(int argc, char **argv){
 
 	ros::init(argc, argv, "clusterisator_node");
 
-	ros::NodeHandle nh;
-
-	clusters_publisher = nh.advertise<sensor_msgs::Image>(CLUSTERS_TOPIC, 5);
-	image_opti_publisher = nh.advertise<sensor_msgs::Image>(IMAGE_OPTI_TOPIC, 5);
-	person_publisher = nh.advertise<sensor_msgs::Image>(PERSON_TOPIC, 5);
-
-	ros::Subscriber sub = nh.subscribe(CAMERA_DEPTH_TOPIC, 5, depthImageCallback);
+	Clusterisator clusterisator;
 
 	ros::spin();
 
