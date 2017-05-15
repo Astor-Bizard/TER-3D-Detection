@@ -13,11 +13,14 @@
 #define IMAGE_OPTI_TOPIC "/clusterisator/image_opti"
 #define IMAGE_OPTI_FRAME_ID "/clusterisator_image_opti_frame"
 
-#define BACKGROUND_TOPIC "/clusterisator/bakcground"
-#define BACKGROUND_FRAME_ID "/clusterisator_bakcground_frame"
+#define BACKGROUND_TOPIC "/clusterisator/background"
+#define BACKGROUND_FRAME_ID "/clusterisator_background_frame"
 
 #define PERSON_TOPIC "/clusterisator/person"
 #define PERSON_FRAME_ID "/clusterisator_person_frame"
+
+#define RGB_PERSON_TOPIC "/clusterisator/rgb_person"
+#define RGB_PERSON_FRAME_ID "/clusterisator_rgb_person_frame"
 
 #define STATIC_THRESHOLD 50
 #define CLUSTER_THRESHOLD 80
@@ -25,7 +28,9 @@
 #define MAX_PERSONS_NB 100
 
 #define DO_OPTI true
-#define T_OPTI 5 // taille du carré d'optimisation
+#define T_OPTI 2 // taille du carré d'optimisation
+
+#define CLUSTER_NOISE_SIZE 300
 
 uint32_t max2(uint32_t a, uint32_t b){
 	return a>b ? a : b;
@@ -53,6 +58,9 @@ ros::Publisher image_opti_publisher;
 ros::Publisher background_publisher;
 
 ros::Publisher person_publisher;
+ros::Publisher rgb_person_publisher;
+
+uint32_t h,w;
 
 std::vector<uint16_t> background;
 
@@ -64,10 +72,12 @@ struct cluster_t{
 	int max_i;
 	int min_j;
 	int max_j;
+	uint16_t dist;
 };
 struct cluster_t clusters[MAX_CLUSTERS_NB];
 
 struct person_t{
+	uint16_t dist;
 	int width;
 	int height;
 };
@@ -80,7 +90,7 @@ uint8_t data[size], avec size = h*step = h*w*2
 
 Interpretation : données sur 16bits, donc sur 2 cases du tableau
 
-[[(bits 8->15)] [(bits 0->7)]]
+[[(low bits 8->15)] [(high bits 0->7)]]
 
 -> uint16_t depth[i,j] = (data[i*w*2 + j*2 + 1] << 8) + data[i*w*2 + j*2];
 
@@ -98,9 +108,11 @@ Clusterisator(){
 	image_opti_publisher = nh.advertise<sensor_msgs::Image>(IMAGE_OPTI_TOPIC, 5);
 #endif
 	background_publisher = nh.advertise<sensor_msgs::Image>(BACKGROUND_TOPIC, 5);
+	
 	person_publisher = nh.advertise<sensor_msgs::Image>(PERSON_TOPIC, 5);
+	rgb_person_publisher = nh.advertise<sensor_msgs::Image>(RGB_PERSON_TOPIC, 5);
 
-	img_sub = nh.subscribe(CAMERA_DEPTH_TOPIC, 5, &Clusterisator::depthImageCallback, this);
+	img_sub = nh.subscribe(CAMERA_DEPTH_TOPIC, 1, &Clusterisator::depthImageCallback, this);
 	
 	first_pass = true;
 }
@@ -108,7 +120,7 @@ Clusterisator(){
 
 #if DO_OPTI
 // Publish the computed optimized data
-void publish_data_opti(uint16_t data[], uint32_t h, uint32_t w, const sensor_msgs::Image::ConstPtr& img){
+void publish_data_opti(const uint16_t data[], const sensor_msgs::Image::ConstPtr& img){
 	sensor_msgs::Image opti_img;
 	opti_img.header.stamp = ros::Time::now();
 	opti_img.header.frame_id = IMAGE_OPTI_FRAME_ID;
@@ -131,7 +143,7 @@ void publish_data_opti(uint16_t data[], uint32_t h, uint32_t w, const sensor_msg
 
 
 // Publish the background
-void publish_background(uint32_t h, uint32_t w, const sensor_msgs::Image::ConstPtr& img){
+void publish_background(const sensor_msgs::Image::ConstPtr& img){
 
 	sensor_msgs::Image background_img;
 	background_img.header.stamp = ros::Time::now();
@@ -152,9 +164,24 @@ void publish_background(uint32_t h, uint32_t w, const sensor_msgs::Image::ConstP
 	background_publisher.publish(background_img);
 }
 
+static bool is_a_person(const uint16_t dist, const int width, const int height){
+	int opti_coef;
+	if(DO_OPTI)
+		opti_coef = T_OPTI;
+	else
+		opti_coef = 1;
+	
+	// TODO calculer la taille de l'objet/personne en fonction de la distance à la caméra
+	//return (width > 50/opti_coef && width < 250/opti_coef && height > 250/opti_coef && dist > 0);
+	return dist>0;
+}
+
 // Compute and publish persons detected
-void publish_person(uint16_t cluster_num[], uint32_t h, uint32_t w, uint16_t n,
-					struct cluster_t clusters[]){
+void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct cluster_t clusters[], const uint16_t data[]){
+	
+	// Image of data - for each pixel :
+	// original depth on 16 bits (in the original format)
+	// last 8 bits : non 0 if it is a person
 	sensor_msgs::Image person;
 	person.header.stamp = ros::Time::now();
 	person.header.frame_id = PERSON_FRAME_ID;
@@ -163,50 +190,87 @@ void publish_person(uint16_t cluster_num[], uint32_t h, uint32_t w, uint16_t n,
 	person.encoding = "rgb8";
 	person.is_bigendian = false;
 	person.step = 3*w;
+
+	// Image for rgb visualisation with rviz
+	sensor_msgs::Image rgb_person;
+	rgb_person.header.stamp = ros::Time::now();
+	rgb_person.header.frame_id = RGB_PERSON_FRAME_ID;
+	rgb_person.height = h;
+	rgb_person.width = w;
+	rgb_person.encoding = "rgb8";
+	rgb_person.is_bigendian = false;
+	rgb_person.step = 3*w;
 	
 	int nb_persons=0;
-	uint8_t cluster_person[n]; // non 0 if it is a person, index in persons
+	uint8_t cluster_person[n]; // non 0 if it is a person, index in persons[]
 	uint32_t i,j;
 	
 	for(i=0;i<n;i++)
 		cluster_person[i]=0;
 	for(i=0; i<h; i++){
 		for(j=0; j<w; j++){
+			person.data.push_back((uint8_t)(data[i*w+j] & 255));
+			person.data.push_back((uint8_t)(data[i*w+j] >> 8));
+		
 			uint16_t c_n = cluster_num[i*w+j];
 			if(c_n != 0){
-				// TODO calculer la taille de l'objet/personne en fonction de la distance à la caméra
 				int c_height = clusters[c_n].max_i - clusters[c_n].min_i + 1;
 				int c_width = clusters[c_n].max_j - clusters[c_n].min_j + 1;
-				if(c_width > 10 && c_width < 50 && c_height > 60){
+				uint16_t c_dist = clusters[c_n].dist;
+				if(is_a_person(c_dist,c_width,c_height)){
 					if(cluster_person[c_n] == 0){
 						nb_persons++;
 						cluster_person[c_n] = nb_persons;
+						persons[nb_persons].dist = c_dist;
 						persons[nb_persons].width = c_width;
 						persons[nb_persons].height = c_height;
 					}
-					person.data.push_back((uint8_t)255);
-					person.data.push_back((uint8_t)0);
-					person.data.push_back((uint8_t)0);
+					person.data.push_back((uint8_t) 255);
+					// Person : red
+					rgb_person.data.push_back((uint8_t)255);
+					rgb_person.data.push_back((uint8_t)0);
+					rgb_person.data.push_back((uint8_t)0);
 				}
 				else{
-					person.data.push_back((uint8_t)0);
-					person.data.push_back((uint8_t)255);
-					person.data.push_back((uint8_t)0);
+					person.data.push_back((uint8_t) 0);
+					// Not a person : green
+					rgb_person.data.push_back((uint8_t)0);
+					rgb_person.data.push_back((uint8_t)255);
+					rgb_person.data.push_back((uint8_t)0);
 				}
 			}
 			else{
-				person.data.push_back((uint8_t)0);
-				person.data.push_back((uint8_t)0);
-				person.data.push_back((uint8_t)255);
+				person.data.push_back((uint8_t) 0);
+				// Background : blue
+				rgb_person.data.push_back((uint8_t)0);
+				rgb_person.data.push_back((uint8_t)0);
+				rgb_person.data.push_back((uint8_t)255);
 			}
 		}
 	}
 	if(nb_persons > 0)
 		ROS_INFO("Found %d person%s !",nb_persons,nb_persons>1?"s":"");
 	for(i=1;i<=nb_persons;i++){
-		ROS_INFO("Person %d : width %d and height %d",i,persons[i].width,persons[i].height);
+		ROS_INFO("Person %d at dist %d : width %d and height %d",i,persons[i].dist,persons[i].width,persons[i].height);
 	}
 	person_publisher.publish(person);
+	rgb_person_publisher.publish(rgb_person);
+}
+
+
+	
+void replace_cluster(uint16_t *cluster_num, const uint16_t old_c, const uint16_t new_c, const uint32_t i, const uint32_t j){
+	if(cluster_num[i*w+j] == old_c){
+		cluster_num[i*w+j] = new_c;
+		if(i>0)
+			replace_cluster(cluster_num,old_c,new_c,i-1,j);
+		if(j>0)
+			replace_cluster(cluster_num,old_c,new_c,i,j-1);
+		if(i<h-1)
+			replace_cluster(cluster_num,old_c,new_c,i+1,j);
+		if(j<w-1)
+			replace_cluster(cluster_num,old_c,new_c,i,j+1);
+	}
 }
 
 
@@ -215,8 +279,8 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 	uint32_t i,j;
 	
 #if DO_OPTI
-	static const uint32_t h = img->height/T_OPTI;
-	static const uint32_t w = img->width/T_OPTI;
+	h = img->height/T_OPTI;
+	w = img->width/T_OPTI;
 	// Pretraitement d'optimisation : reduction de la taille de data
 	uint16_t data[h*w];
 	for(i=0; i<h; i++){
@@ -228,10 +292,10 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		}
 	}
 	
-	publish_data_opti(data,h,w,img);
+	publish_data_opti(data,img);
 #else
-	static const uint32_t h = img->height;
-	static const uint32_t w = img->width;
+	h = img->height;
+	w = img->width;
 	uint16_t data[h*w];
 	for(i=0; i<h; i++){
 		for(j=0; j<w; j++){
@@ -260,7 +324,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		*/
 	}
 	
-	publish_background(h,w,img);
+	publish_background(img);
 	
 	#define NEW_CLUSTER(INDEX_I,INDEX_J) nb_clusters++;\
 										 cluster_num[INDEX_I*w+INDEX_J] = n;\
@@ -269,6 +333,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 										 clusters[n].max_i = INDEX_I;\
 										 clusters[n].min_j = INDEX_J;\
 										 clusters[n].max_j = INDEX_J;\
+										 clusters[n].dist = data[INDEX_I*w+INDEX_J];\
 										 n++;
 	
 	#define IS_IN_BACKGROUND(INDEX) (abs(data[INDEX] - background[INDEX]) < STATIC_THRESHOLD)
@@ -337,12 +402,10 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 								small = y;
 								big = x;
 							}
-							//TODO optimiser la substitution
-							//ROS_INFO("Optimise-moi");
-							for(uint32_t i2=0;i2<=h;i2++)
-								for(uint32_t j2=0;j2<w;j2++)
-									if(cluster_num[i2*w+j2]==small)
-										cluster_num[i2*w+j2]=big;
+							
+							// On fusionne les clusters (le petit dans le grand)
+							cluster_num[i*w+j] = small;
+							replace_cluster(cluster_num,small,big,i,j);
 						
 							cluster_num[i*w+j] = big;
 							nb_clusters--;
@@ -388,10 +451,10 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 	
 	
 	// Suppression du bruit
-	for(i=1;i<h-1;i++)
-		for(j=1;j<w-1;j++)
-			// Si c'est un cluster de moins de 25 pixels, il est considéré comme du bruit.
-			if(clusters[cluster_num[i*w+j]].size < 25){
+	for(i=0;i<h;i++)
+		for(j=0;j<w;j++)
+			// Si c'est un petit cluster, il est considéré comme du bruit.
+			if(clusters[cluster_num[i*w+j]].size < CLUSTER_NOISE_SIZE){
 			 	clusters[cluster_num[i*w+j]].size --;
 			 	if(clusters[cluster_num[i*w+j]].size == 0)
 					nb_clusters--;
@@ -416,7 +479,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 	}
 	clusters_publisher.publish(clst);
 	
-	publish_person(cluster_num,h,w,n,clusters);
+	publish_person(cluster_num,n,clusters,data);
 }
 
 
