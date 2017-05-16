@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(clusterisator)
+project(securisator)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -66,7 +66,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate added messages and services with any dependencies listed here
 # generate_messages(
 #   DEPENDENCIES
-#   sensor_msgs#   std_msgs
+#   sensor_msgs
 # )
 
 ################################################
@@ -100,8 +100,8 @@ find_package(catkin REQUIRED COMPONENTS
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES clusterisator
-#  CATKIN_DEPENDS roscpp sensor_msgs std_msgs
+#  LIBRARIES securisator
+#  CATKIN_DEPENDS roscpp sensor_msgs
 #  DEPENDS system_lib
 )
 
@@ -117,24 +117,24 @@ include_directories(
 )
 
 ## Declare a C++ library
-# add_library(clusterisator
-#   src/${PROJECT_NAME}/clusterisator.cpp
+# add_library(securisator
+#   src/${PROJECT_NAME}/securisator.cpp
 # )
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
 ## either from message generation or dynamic reconfigure
-# add_dependencies(clusterisator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# add_dependencies(securisator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Declare a C++ executable
-add_executable(clusterisator_node src/clusterisator_node.cpp)
+add_executable(securisator_node src/securisator_node.cpp)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
-add_dependencies(clusterisator_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(securisator_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
-target_link_libraries(clusterisator_node
+target_link_libraries(securisator_node
   ${catkin_LIBRARIES}
 )
 
@@ -153,7 +153,7 @@ target_link_libraries(clusterisator_node
 # )
 
 ## Mark executables and/or libraries for installation
-# install(TARGETS clusterisator clusterisator_node
+# install(TARGETS securisator securisator_node
 #   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 #   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -178,7 +178,7 @@ target_link_libraries(clusterisator_node
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_clusterisator.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_securisator.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
