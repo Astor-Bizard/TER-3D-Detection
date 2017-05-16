@@ -21,7 +21,7 @@
 #define RGB_PERSON_TOPIC "/clusterisator/rgb_person"
 #define RGB_PERSON_FRAME_ID "/clusterisator_rgb_person_frame"
 
-#define STATIC_THRESHOLD 50
+#define STATIC_THRESHOLD 80
 #define CLUSTER_THRESHOLD 80
 #define MAX_CLUSTERS_NB 65535
 #define MAX_PERSONS_NB 100
@@ -29,7 +29,12 @@
 #define DO_OPTI true
 #define T_OPTI 2 // taille du carré d'optimisation
 
-#define CLUSTER_NOISE_SIZE 300
+#define CLUSTER_NOISE_SIZE 300	// seems nice to be 1200/(T_OPTI²)
+
+#define STATIC_OBJECT 0
+#define MOVING_OBJECT 1
+#define MOVING_PERSON 2
+#define ROBOT         3
 
 uint32_t max2(uint32_t a, uint32_t b){
 	return a>b ? a : b;
@@ -172,7 +177,7 @@ static bool is_a_person(const uint16_t dist, const int width, const int height){
 	
 	// TODO calculer la taille de l'objet/personne en fonction de la distance à la caméra
 	//return (width > 50/opti_coef && width < 250/opti_coef && height > 250/opti_coef && dist > 0);
-	return dist>0;
+	return dist>0 && dist<9870 && width > 50/opti_coef && width < 350/opti_coef && height > 180/opti_coef;
 }
 
 // Compute and publish persons detected
@@ -180,7 +185,7 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	
 	// Image of data - for each pixel :
 	// original depth on 16 bits (in the original format)
-	// last 8 bits : non 0 if it is a person
+	// last 8 bits : 0 if static, 1 if moving, 2 if person, 3 if robot
 	sensor_msgs::Image person;
 	person.header.stamp = ros::Time::now();
 	person.header.frame_id = PERSON_FRAME_ID;
@@ -204,6 +209,8 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	uint8_t cluster_person[n]; // non 0 if it is a person, index in persons[]
 	uint32_t i,j;
 	
+	uint16_t cluster_robot = 0;
+	
 	for(i=0;i<n;i++)
 		cluster_person[i]=0;
 	for(i=0; i<h; i++){
@@ -224,22 +231,33 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 						persons[nb_persons].width = c_width;
 						persons[nb_persons].height = c_height;
 					}
-					person.data.push_back((uint8_t) 255);
+					person.data.push_back((uint8_t) MOVING_PERSON);
 					// Person : red
 					rgb_person.data.push_back((uint8_t)255);
 					rgb_person.data.push_back((uint8_t)0);
 					rgb_person.data.push_back((uint8_t)0);
 				}
 				else{
-					person.data.push_back((uint8_t) 0);
-					// Not a person : green
-					rgb_person.data.push_back((uint8_t)0);
-					rgb_person.data.push_back((uint8_t)255);
-					rgb_person.data.push_back((uint8_t)0);
+					if((abs(i-(h/2)) < (h/10) && abs(j-(w/2)) < (w/10) && cluster_robot == 0) || cluster_robot == c_n){
+						cluster_robot = c_n;
+						// A moving object in the center of the view : it's the robot
+						person.data.push_back((uint8_t) ROBOT);
+						// Robot : yellow
+						rgb_person.data.push_back((uint8_t)255);
+						rgb_person.data.push_back((uint8_t)255);
+						rgb_person.data.push_back((uint8_t)0);
+					}
+					else{
+						person.data.push_back((uint8_t) MOVING_OBJECT);
+						// Not a person : green
+						rgb_person.data.push_back((uint8_t)0);
+						rgb_person.data.push_back((uint8_t)255);
+						rgb_person.data.push_back((uint8_t)0);
+					}
 				}
 			}
 			else{
-				person.data.push_back((uint8_t) 0);
+				person.data.push_back((uint8_t) STATIC_OBJECT);
 				// Background : blue
 				rgb_person.data.push_back((uint8_t)0);
 				rgb_person.data.push_back((uint8_t)0);
@@ -448,7 +466,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		}
 	}
 	
-	
+
 	// Suppression du bruit
 	for(i=0;i<h;i++)
 		for(j=0;j<w;j++)
