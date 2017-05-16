@@ -1,6 +1,5 @@
 #include "ros/ros.h"
 #include "sensor_msgs/Image.h"
-#include "sensor_msgs/LaserScan.h"
 
 #include <cmath>
 #include <sstream>
