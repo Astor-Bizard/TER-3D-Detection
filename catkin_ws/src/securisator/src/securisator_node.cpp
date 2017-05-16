@@ -1,6 +1,5 @@
 #include "ros/ros.h"
 #include "sensor_msgs/Image.h"
-<<<<<<< HEAD
 #include "sensor_msgs/CameraInfo.h"
 #include "geometry_msgs/Point.h"
 
