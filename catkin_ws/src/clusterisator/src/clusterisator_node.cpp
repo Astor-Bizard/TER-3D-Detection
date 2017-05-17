@@ -1,6 +1,8 @@
 #include "ros/ros.h"
 #include "sensor_msgs/Image.h"
 
+#include "../../../devel/include/clusterisator/Persons.h"
+
 #include <cmath>
 #include <sstream>
 
@@ -21,15 +23,15 @@
 #define RGB_PERSON_TOPIC "/clusterisator/rgb_person"
 #define RGB_PERSON_FRAME_ID "/clusterisator_rgb_person_frame"
 
-#define STATIC_THRESHOLD 80
+#define STATIC_THRESHOLD 50
 #define CLUSTER_THRESHOLD 80
 #define MAX_CLUSTERS_NB 65535
 #define MAX_PERSONS_NB 100
 
 #define DO_OPTI true
-#define T_OPTI 2 // taille du carré d'optimisation
+#define T_OPTI 3 // taille du carré d'optimisation
 
-#define CLUSTER_NOISE_SIZE 300	// seems nice to be 1200/(T_OPTI²)
+#define CLUSTER_NOISE_SIZE 150	// seems nice to be 1200/(T_OPTI²)
 
 #define STATIC_OBJECT 0
 #define MOVING_OBJECT 1
@@ -113,7 +115,7 @@ Clusterisator(){
 #endif
 	background_publisher = nh.advertise<sensor_msgs::Image>(BACKGROUND_TOPIC, 5);
 	
-	person_publisher = nh.advertise<sensor_msgs::Image>(PERSON_TOPIC, 5);
+	person_publisher = nh.advertise<clusterisator::Persons>(PERSON_TOPIC, 5);
 	rgb_person_publisher = nh.advertise<sensor_msgs::Image>(RGB_PERSON_TOPIC, 5);
 
 	img_sub = nh.subscribe(CAMERA_DEPTH_TOPIC, 1, &Clusterisator::depthImageCallback, this);
@@ -186,24 +188,24 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	// Image of data - for each pixel :
 	// original depth on 16 bits (in the original format)
 	// last 8 bits : 0 if static, 1 if moving, 2 if person, 3 if robot
-	sensor_msgs::Image person;
-	person.header.stamp = ros::Time::now();
-	person.header.frame_id = PERSON_FRAME_ID;
-	person.height = h;
-	person.width = w;
-	person.encoding = "rgb8";
-	person.is_bigendian = false;
-	person.step = 3*w;
+	sensor_msgs::Image img_person;
+	img_person.header.stamp = ros::Time::now();
+	img_person.header.frame_id = PERSON_FRAME_ID;
+	img_person.height = h;
+	img_person.width = w;
+	img_person.encoding = "rgb8";
+	img_person.is_bigendian = false;
+	img_person.step = 3*w;
 
 	// Image for rgb visualisation with rviz
-	sensor_msgs::Image rgb_person;
-	rgb_person.header.stamp = ros::Time::now();
-	rgb_person.header.frame_id = RGB_PERSON_FRAME_ID;
-	rgb_person.height = h;
-	rgb_person.width = w;
-	rgb_person.encoding = "rgb8";
-	rgb_person.is_bigendian = false;
-	rgb_person.step = 3*w;
+	sensor_msgs::Image img_rgb_person;
+	img_rgb_person.header.stamp = ros::Time::now();
+	img_rgb_person.header.frame_id = RGB_PERSON_FRAME_ID;
+	img_rgb_person.height = h;
+	img_rgb_person.width = w;
+	img_rgb_person.encoding = "rgb8";
+	img_rgb_person.is_bigendian = false;
+	img_rgb_person.step = 3*w;
 	
 	int nb_persons=0;
 	uint8_t cluster_person[n]; // non 0 if it is a person, index in persons[]
@@ -215,8 +217,8 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 		cluster_person[i]=0;
 	for(i=0; i<h; i++){
 		for(j=0; j<w; j++){
-			person.data.push_back((uint8_t)(data[i*w+j] & 255));
-			person.data.push_back((uint8_t)(data[i*w+j] >> 8));
+			img_person.data.push_back((uint8_t)(data[i*w+j] & 255));
+			img_person.data.push_back((uint8_t)(data[i*w+j] >> 8));
 		
 			uint16_t c_n = cluster_num[i*w+j];
 			if(c_n != 0){
@@ -231,47 +233,51 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 						persons[nb_persons].width = c_width;
 						persons[nb_persons].height = c_height;
 					}
-					person.data.push_back((uint8_t) MOVING_PERSON);
+					img_person.data.push_back((uint8_t) MOVING_PERSON);
 					// Person : red
-					rgb_person.data.push_back((uint8_t)255);
-					rgb_person.data.push_back((uint8_t)0);
-					rgb_person.data.push_back((uint8_t)0);
+					img_rgb_person.data.push_back((uint8_t)255);
+					img_rgb_person.data.push_back((uint8_t)0);
+					img_rgb_person.data.push_back((uint8_t)0);
 				}
 				else{
-					if((abs(i-(h/2)) < (h/10) && abs(j-(w/2)) < (w/10) && cluster_robot == 0) || cluster_robot == c_n){
+					if(cluster_robot == c_n || (cluster_robot == 0 && abs(i-(h/2)) < (h/10) && abs(j-(w/2)) < (w/10))){
 						cluster_robot = c_n;
 						// A moving object in the center of the view : it's the robot
-						person.data.push_back((uint8_t) ROBOT);
+						img_person.data.push_back((uint8_t) ROBOT);
 						// Robot : yellow
-						rgb_person.data.push_back((uint8_t)255);
-						rgb_person.data.push_back((uint8_t)255);
-						rgb_person.data.push_back((uint8_t)0);
+						img_rgb_person.data.push_back((uint8_t)255);
+						img_rgb_person.data.push_back((uint8_t)255);
+						img_rgb_person.data.push_back((uint8_t)0);
 					}
 					else{
-						person.data.push_back((uint8_t) MOVING_OBJECT);
+						img_person.data.push_back((uint8_t) MOVING_OBJECT);
 						// Not a person : green
-						rgb_person.data.push_back((uint8_t)0);
-						rgb_person.data.push_back((uint8_t)255);
-						rgb_person.data.push_back((uint8_t)0);
+						img_rgb_person.data.push_back((uint8_t)0);
+						img_rgb_person.data.push_back((uint8_t)255);
+						img_rgb_person.data.push_back((uint8_t)0);
 					}
 				}
 			}
 			else{
-				person.data.push_back((uint8_t) STATIC_OBJECT);
+				img_person.data.push_back((uint8_t) STATIC_OBJECT);
 				// Background : blue
-				rgb_person.data.push_back((uint8_t)0);
-				rgb_person.data.push_back((uint8_t)0);
-				rgb_person.data.push_back((uint8_t)255);
+				img_rgb_person.data.push_back((uint8_t)0);
+				img_rgb_person.data.push_back((uint8_t)0);
+				img_rgb_person.data.push_back((uint8_t)255);
 			}
 		}
 	}
-	if(nb_persons > 0)
-		ROS_INFO("Found %d person%s !",nb_persons,nb_persons>1?"s":"");
-	for(i=1;i<=nb_persons;i++){
-		ROS_INFO("Person %d at dist %d : width %d and height %d",i,persons[i].dist,persons[i].width,persons[i].height);
-	}
-	person_publisher.publish(person);
-	rgb_person_publisher.publish(rgb_person);
+	//if(nb_persons > 0)
+	//	ROS_INFO("Found %d person%s !",nb_persons,nb_persons>1?"s":"");
+	//for(i=1;i<=nb_persons;i++){
+	//	ROS_INFO("Person %d at dist %d : width %d and height %d",i,persons[i].dist,persons[i].width,persons[i].height);
+	//}
+	clusterisator::Persons msg_person;
+	msg_person.there_is_a_robot = (cluster_robot != 0);
+	msg_person.nb_persons = nb_persons;
+	msg_person.img = img_person;
+	person_publisher.publish(msg_person);
+	rgb_person_publisher.publish(img_rgb_person);
 }
 
 
@@ -320,183 +326,214 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		}
 	}
 #endif
+
+	uint16_t cluster_num[h*w];
+	//uint16_t prev_image_clusters[h*w];
 	
 	if(first_pass){
 		first_pass = false;
 		for(i=0; i<h; i++)
 			for(j=0; j<w; j++)
 				background.push_back(data[i*w+j]);
-		/*	
+		
 		// Suppression du bruit dans le background
 		for(i=1;i<h-1;i++)
 			for(j=1;j<w-1;j++)
-				// Si le pixel est différent de tous ses voisins, c'est du bruit
-				if(	  abs(background[i*w+j] - background[i*w+j-1]) < CLUSTER_THRESHOLD
-				   && abs(background[i*w+j] - background[i*w+j+1]) < CLUSTER_THRESHOLD
-				   && abs(background[i*w+j] - background[(i-1)*w+j]) < CLUSTER_THRESHOLD
-				   && abs(background[i*w+j] - background[(i+1)*w+j]) < CLUSTER_THRESHOLD){
-
+				// Si le pixel est à 0, c'est du bruit
+				if(background[i*w+j] == 0){
+					if(background[(i-1)*w+j] != 0)
+				 		background[i*w+j] = background[(i-1)*w+j];
+				 	else if(background[i*w+j-1] != 0)
 				 		background[i*w+j] = background[i*w+j-1];
+				 	else if(background[(i+1)*w+j] != 0)
+				 		background[i*w+j] = background[(i+1)*w+j];
+				 	else if(background[i*w+j+1] != 0)
+				 		background[i*w+j] = background[i*w+j+1];
 				}
-		*/
+		
+		//for(i=0; i<h; i++)
+		//	for(j=0; j<w; j++)
+		//		prev_image_clusters[i*w+j] = 0;
 	}
+	else{
+		#define NEW_CLUSTER(INDEX_I,INDEX_J) nb_clusters++;\
+											 cluster_num[INDEX_I*w+INDEX_J] = n;\
+											 clusters[n].size = 1;\
+											 clusters[n].min_i = INDEX_I;\
+											 clusters[n].max_i = INDEX_I;\
+											 clusters[n].min_j = INDEX_J;\
+											 clusters[n].max_j = INDEX_J;\
+											 clusters[n].dist = data[INDEX_I*w+INDEX_J];\
+											 n++;
 	
-	publish_background(img);
+		#define IS_IN_BACKGROUND(INDEX) (abs(data[INDEX] - background[INDEX]) < STATIC_THRESHOLD)
 	
-	#define NEW_CLUSTER(INDEX_I,INDEX_J) nb_clusters++;\
-										 cluster_num[INDEX_I*w+INDEX_J] = n;\
-										 clusters[n].size = 1;\
-										 clusters[n].min_i = INDEX_I;\
-										 clusters[n].max_i = INDEX_I;\
-										 clusters[n].min_j = INDEX_J;\
-										 clusters[n].max_j = INDEX_J;\
-										 clusters[n].dist = data[INDEX_I*w+INDEX_J];\
-										 n++;
-	
-	#define IS_IN_BACKGROUND(INDEX) (abs(data[INDEX] - background[INDEX]) < STATIC_THRESHOLD)
-	
-	uint16_t cluster_num[h*w];
-	
-	uint16_t x,y;
-	uint16_t nb_clusters=0;
-	uint16_t n = 1;	// start at 1, 0 is for static points (equals to background)
-	if(IS_IN_BACKGROUND(0))
-		cluster_num[0] = 0;
-	else
-		NEW_CLUSTER(0,0);
+		uint16_t x,y;
+		uint16_t nb_clusters=0;
+		uint16_t n = 1;	// start at 1, 0 is for static points (equals to background)
+		if(IS_IN_BACKGROUND(0))
+			cluster_num[0] = 0;
+		else
+			NEW_CLUSTER(0,0);
 
-	for(i=1; i<h; i++){
-		if(IS_IN_BACKGROUND(i*w))
-			cluster_num[i*w] = 0;
-		else{
-			if(abs(data[i*w] - data[(i-1)*w]) < CLUSTER_THRESHOLD && cluster_num[(i-1)*w] != 0){
-				x = cluster_num[(i-1)*w];
-				cluster_num[i*w] = x;
-				clusters[x].size ++;
-				if(clusters[x].max_i < i)
-					clusters[x].max_i = i;
-			}
+		for(i=1; i<h; i++){
+			if(IS_IN_BACKGROUND(i*w))
+				cluster_num[i*w] = 0;
 			else{
-				NEW_CLUSTER(i,0);
+				if(abs(data[i*w] - data[(i-1)*w]) < CLUSTER_THRESHOLD && cluster_num[(i-1)*w] != 0){
+					x = cluster_num[(i-1)*w];
+					cluster_num[i*w] = x;
+					clusters[x].size ++;
+					if(clusters[x].max_i < i)
+						clusters[x].max_i = i;
+				}
+				else{
+					NEW_CLUSTER(i,0);
+				}
 			}
 		}
-	}
-	for(j=1; j<w; j++){
-		if(IS_IN_BACKGROUND(j))
-			cluster_num[j] = 0;
-		else{
-			if(abs(data[j] - data[j-1]) < CLUSTER_THRESHOLD && cluster_num[j-1] != 0){
-				y = cluster_num[j-1];
-				cluster_num[j] = y;
-				clusters[y].size ++;
-				if(clusters[y].max_j < j)
-					clusters[y].max_j = j;
-			}
-			else{
-				NEW_CLUSTER(0,j);
-			}
-		}
-	}
-	for(i=1; i<h; i++){
 		for(j=1; j<w; j++){
-			if(IS_IN_BACKGROUND(i*w+j))
-				cluster_num[i*w+j] = 0;
+			if(IS_IN_BACKGROUND(j))
+				cluster_num[j] = 0;
 			else{
-				bool next_to_top  = abs(data[i*w+j] - data[(i-1)*w+j]) < CLUSTER_THRESHOLD && cluster_num[(i-1)*w+j] != 0;
-				bool next_to_left = abs(data[i*w+j] - data[i*w+j-1]) < CLUSTER_THRESHOLD && cluster_num[i*w+j-1] != 0;
-				x = cluster_num[(i-1)*w+j];
-				y = cluster_num[i*w+j-1];
-				if(next_to_top){
-					if(next_to_left){
-						// top & left
-						if(x != y){
-							uint16_t small,big;
-							if(clusters[x].size < clusters[y].size){
-								small = x;
-								big = y;
-							}
-							else{
-								small = y;
-								big = x;
-							}
+				if(abs(data[j] - data[j-1]) < CLUSTER_THRESHOLD && cluster_num[j-1] != 0){
+					y = cluster_num[j-1];
+					cluster_num[j] = y;
+					clusters[y].size ++;
+					if(clusters[y].max_j < j)
+						clusters[y].max_j = j;
+				}
+				else{
+					NEW_CLUSTER(0,j);
+				}
+			}
+		}
+		for(i=1; i<h; i++){
+			for(j=1; j<w; j++){
+				if(IS_IN_BACKGROUND(i*w+j))
+					cluster_num[i*w+j] = 0;
+				else{
+					bool next_to_top  = abs(data[i*w+j] - data[(i-1)*w+j]) < CLUSTER_THRESHOLD && cluster_num[(i-1)*w+j] != 0;
+					bool next_to_left = abs(data[i*w+j] - data[i*w+j-1]) < CLUSTER_THRESHOLD && cluster_num[i*w+j-1] != 0;
+					x = cluster_num[(i-1)*w+j];
+					y = cluster_num[i*w+j-1];
+					if(next_to_top){
+						if(next_to_left){
+							// top & left
+							if(x != y){
+								uint16_t small,big;
+								if(clusters[x].size < clusters[y].size){
+									small = x;
+									big = y;
+								}
+								else{
+									small = y;
+									big = x;
+								}
 							
-							// On fusionne les clusters (le petit dans le grand)
-							cluster_num[i*w+j] = small;
-							replace_cluster(cluster_num,small,big,i,j);
+								// On fusionne les clusters (le petit dans le grand)
+								cluster_num[i*w+j] = small;
+								replace_cluster(cluster_num,small,big,i,j);
 						
-							cluster_num[i*w+j] = big;
-							nb_clusters--;
-							clusters[big].size += clusters[small].size + 1;
-							clusters[big].min_i = min3(clusters[big].min_i,clusters[small].min_i,i);
-							clusters[big].min_j = min3(clusters[big].min_j,clusters[small].min_j,j);
-							clusters[big].max_i = max3(clusters[big].max_i,clusters[small].max_i,i);
-							clusters[big].max_j = max3(clusters[big].max_j,clusters[small].max_j,j);
+								cluster_num[i*w+j] = big;
+								nb_clusters--;
+								clusters[big].size += clusters[small].size + 1;
+								clusters[big].min_i = min3(clusters[big].min_i,clusters[small].min_i,i);
+								clusters[big].min_j = min3(clusters[big].min_j,clusters[small].min_j,j);
+								clusters[big].max_i = max3(clusters[big].max_i,clusters[small].max_i,i);
+								clusters[big].max_j = max3(clusters[big].max_j,clusters[small].max_j,j);
+							}
+							else{ // x=y
+								cluster_num[i*w+j] = x;
+								clusters[x].size ++;
+								if(clusters[x].max_i < i)
+									clusters[x].max_i = i;
+								if(clusters[y].max_j < j)
+									clusters[y].max_j = j;
+						
+							}
 						}
-						else{ // x=y
+						else{
+							// top & !left
 							cluster_num[i*w+j] = x;
 							clusters[x].size ++;
 							if(clusters[x].max_i < i)
 								clusters[x].max_i = i;
-							if(clusters[y].max_j < j)
-								clusters[y].max_j = j;
-						
 						}
 					}
+					else if(next_to_left){
+						// !top & left
+						cluster_num[i*w+j] = y;
+						clusters[y].size ++;
+						if(clusters[y].max_j < j)
+							clusters[y].max_j = j;
+				
+					}
 					else{
-						// top & !left
-						cluster_num[i*w+j] = x;
-						clusters[x].size ++;
-						if(clusters[x].max_i < i)
-							clusters[x].max_i = i;
+						// !top & !left
+						NEW_CLUSTER(i,j);
 					}
 				}
-				else if(next_to_left){
-					// !top & left
-					cluster_num[i*w+j] = y;
-					clusters[y].size ++;
-					if(clusters[y].max_j < j)
-						clusters[y].max_j = j;
-				
-				}
-				else{
-					// !top & !left
-					NEW_CLUSTER(i,j);
-				}
 			}
 		}
-	}
-	
 
-	// Suppression du bruit
-	for(i=0;i<h;i++)
-		for(j=0;j<w;j++)
-			// Si c'est un petit cluster, il est considéré comme du bruit.
-			if(clusters[cluster_num[i*w+j]].size < CLUSTER_NOISE_SIZE){
-			 	clusters[cluster_num[i*w+j]].size --;
-			 	if(clusters[cluster_num[i*w+j]].size == 0)
-					nb_clusters--;
-			 	cluster_num[i*w+j] = 0;
+		//uint16_t image_clusters[h*w];
+		//for(i=0; i<h; i++)
+		//	for(j=0; j<w; j++)
+		//		image_clusters[i*w+j] = cluster_num[i*w+j];
+
+		// Suppression du bruit		
+		for(i=0;i<h;i++){
+			for(j=0;j<w;j++){
+				// Si c'est un petit cluster, il est considéré comme du bruit.
+				if(clusters[cluster_num[i*w+j]].size < CLUSTER_NOISE_SIZE){
+				 	clusters[cluster_num[i*w+j]].size --;
+				 	if(clusters[cluster_num[i*w+j]].size == 0)
+						nb_clusters--;
+				 	cluster_num[i*w+j] = 0;
+				}
 			}
-	
-	
-	sensor_msgs::Image clst;
-	clst.header.stamp = ros::Time::now();
-	clst.header.frame_id = CLUSTERS_FRAME_ID;
-	clst.height = h;
-	clst.width = w;
-	clst.encoding = img->encoding;
-	clst.is_bigendian = img->is_bigendian;
-	clst.step = 2*w;
-	
-	for(i=0; i<h; i++){
-		for(j=0; j<w; j++){
-			clst.data.push_back((uint8_t)(cluster_num[i*w+j] & 255));
-			clst.data.push_back((uint8_t)(cluster_num[i*w+j] >> 8));
 		}
-	}
-	clusters_publisher.publish(clst);
+		//for(i=0;i<h;i++){
+		//	for(j=0;j<w;j++){
+		//		// Si c'est un point présent sur 1 seule frame, il est considéré comme du bruit.
+		//		// TODO a voir si le framerate est suffisant
+		//		if(prev_image_clusters[i*w+j] == 0 && cluster_num[i*w+j] != 0){
+		//			cluster_num[i*w+j] = 0;
+		//		 	if(clusters[cluster_num[i*w+j]].size == 0)
+		//				nb_clusters--;
+		//		 	cluster_num[i*w+j] = 0;
+		//		}
+		//	}
+		//}
+		
+		//for(i=0; i<h; i++)
+		//	for(j=0; j<w; j++)
+		//		prev_image_clusters[i*w+j] = image_clusters[i*w+j];
 	
-	publish_person(cluster_num,n,clusters,data);
+	
+		sensor_msgs::Image clst;
+		clst.header.stamp = ros::Time::now();
+		clst.header.frame_id = CLUSTERS_FRAME_ID;
+		clst.height = h;
+		clst.width = w;
+		clst.encoding = img->encoding;
+		clst.is_bigendian = img->is_bigendian;
+		clst.step = 2*w;
+	
+		for(i=0; i<h; i++){
+			for(j=0; j<w; j++){
+				clst.data.push_back((uint8_t)(cluster_num[i*w+j] & 255));
+				clst.data.push_back((uint8_t)(cluster_num[i*w+j] >> 8));
+			}
+		}
+		clusters_publisher.publish(clst);
+	
+		publish_person(cluster_num,n,clusters,data);
+	
+	}
+				
+	publish_background(img);
 }
 
 
