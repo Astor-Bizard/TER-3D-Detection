@@ -3,3 +3,6 @@
 /catkin_ws/install
 /catkin_ws/.catkin_workspace
 /bagfiles/*.bag
+*.png
+*.jpg
+*.jpeg
