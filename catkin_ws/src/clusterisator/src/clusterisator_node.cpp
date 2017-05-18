@@ -27,12 +27,21 @@
 #define CLUSTER_THRESHOLD 80
 #define MAX_CLUSTERS_NB 65535
 #define MAX_PERSONS_NB 100
+#define MAX_DYNAMICNESS 5
+#define DYNAMICNESS_THRESHOLD 3
 
 #define DO_OPTI true
 #define T_OPTI 2 // taille du carré d'optimisation
 
 #define CLUSTER_NOISE_SIZE 300	// seems nice to be 1200/(T_OPTI²)
-
+/*
+uint16_t max2(uint16_t a, uint16_t b){
+	return a>b ? a : b;
+}
+uint16_t min2(uint16_t a, uint16_t b){
+	return a<b ? a : b;
+}
+*/
 uint32_t max2(uint32_t a, uint32_t b){
 	return a>b ? a : b;
 }
@@ -64,23 +73,24 @@ ros::Publisher rgb_person_publisher;
 uint32_t h,w;
 
 std::vector<uint16_t> background;
+std::vector<uint16_t> dynamicness;
 
 bool first_pass;
 
 struct cluster_t{
-	int size;
-	int min_i;
-	int max_i;
-	int min_j;
-	int max_j;
+	uint32_t size;
+	uint32_t min_i;
+	uint32_t max_i;
+	uint32_t min_j;
+	uint32_t max_j;
 	uint16_t dist;
 };
 struct cluster_t clusters[MAX_CLUSTERS_NB];
 
 struct person_t{
 	uint16_t dist;
-	int width;
-	int height;
+	uint32_t width;
+	uint32_t height;
 };
 struct person_t persons[MAX_PERSONS_NB];
 
@@ -167,10 +177,7 @@ void publish_background(const sensor_msgs::Image::ConstPtr& img){
 
 static bool is_a_person(const uint16_t dist, const int width, const int height){
 	int opti_coef;
-	if(DO_OPTI)
-		opti_coef = T_OPTI;
-	else
-		opti_coef = 1;
+	opti_coef = DO_OPTI ? T_OPTI : 1;
 	
 	// TODO calculer la taille de l'objet/personne en fonction de la distance à la caméra
 	//return (width > 50/opti_coef && width < 250/opti_coef && height > 250/opti_coef && dist > 0);
@@ -270,6 +277,7 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	//}
 	msg_person.there_is_a_robot = (cluster_robot != 0);
 	msg_person.nb_persons = nb_persons;
+	msg_person.resolution_factor = DO_OPTI ? T_OPTI : 1;
 	msg_person.img = img_person;
 	person_publisher.publish(msg_person);
 	rgb_person_publisher.publish(img_rgb_person);
@@ -322,33 +330,33 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 	}
 #endif
 
+	// Suppression du bruit
+	for(i=1;i<h-1;i++){
+		for(j=1;j<w-1;j++){
+			// Si le pixel est à 0, c'est du bruit
+			if(data[i*w+j] == 0){
+				if(data[(i-1)*w+j] != 0)
+			 		data[i*w+j] = data[(i-1)*w+j];
+			 	else if(data[i*w+j-1] != 0)
+			 		data[i*w+j] = data[i*w+j-1];
+			 	else if(data[(i+1)*w+j] != 0)
+			 		data[i*w+j] = data[(i+1)*w+j];
+			 	else if(data[i*w+j+1] != 0)
+			 		data[i*w+j] = data[i*w+j+1];
+			}
+		}
+	}
+
 	uint16_t cluster_num[h*w];
-	//uint16_t prev_image_clusters[h*w];
 	
 	if(first_pass){
 		first_pass = false;
-		for(i=0; i<h; i++)
-			for(j=0; j<w; j++)
+		for(i=0; i<h; i++){
+			for(j=0; j<w; j++){
 				background.push_back(data[i*w+j]);
-		
-		// Suppression du bruit dans le background
-		for(i=1;i<h-1;i++)
-			for(j=1;j<w-1;j++)
-				// Si le pixel est à 0, c'est du bruit
-				if(background[i*w+j] == 0){
-					if(background[(i-1)*w+j] != 0)
-				 		background[i*w+j] = background[(i-1)*w+j];
-				 	else if(background[i*w+j-1] != 0)
-				 		background[i*w+j] = background[i*w+j-1];
-				 	else if(background[(i+1)*w+j] != 0)
-				 		background[i*w+j] = background[(i+1)*w+j];
-				 	else if(background[i*w+j+1] != 0)
-				 		background[i*w+j] = background[i*w+j+1];
-				}
-		
-		//for(i=0; i<h; i++)
-		//	for(j=0; j<w; j++)
-		//		prev_image_clusters[i*w+j] = 0;
+				dynamicness.push_back(1);
+			}
+		}
 	}
 	else{
 		#define NEW_CLUSTER(INDEX_I,INDEX_J) nb_clusters++;\
@@ -372,9 +380,12 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 			NEW_CLUSTER(0,0);
 
 		for(i=1; i<h; i++){
-			if(IS_IN_BACKGROUND(i*w))
+			if(IS_IN_BACKGROUND(i*w)){
 				cluster_num[i*w] = 0;
+				dynamicness[i*w] = max2(1,dynamicness[i*w]-1);
+			}
 			else{
+				dynamicness[i*w] = min2(MAX_DYNAMICNESS,dynamicness[i*w]+1);
 				if(abs(data[i*w] - data[(i-1)*w]) < CLUSTER_THRESHOLD && cluster_num[(i-1)*w] != 0){
 					x = cluster_num[(i-1)*w];
 					cluster_num[i*w] = x;
@@ -388,9 +399,12 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 			}
 		}
 		for(j=1; j<w; j++){
-			if(IS_IN_BACKGROUND(j))
+			if(IS_IN_BACKGROUND(j)){
 				cluster_num[j] = 0;
+				dynamicness[j] = max2(1,dynamicness[j]-1);
+			}
 			else{
+				dynamicness[j] = min2(MAX_DYNAMICNESS,dynamicness[j]+1);
 				if(abs(data[j] - data[j-1]) < CLUSTER_THRESHOLD && cluster_num[j-1] != 0){
 					y = cluster_num[j-1];
 					cluster_num[j] = y;
@@ -405,9 +419,12 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		}
 		for(i=1; i<h; i++){
 			for(j=1; j<w; j++){
-				if(IS_IN_BACKGROUND(i*w+j))
+				if(IS_IN_BACKGROUND(i*w+j)){
 					cluster_num[i*w+j] = 0;
+					dynamicness[i*w+j] = max2(1,dynamicness[i*w+j]-1);
+				}
 				else{
+					dynamicness[i*w+j] = min2(MAX_DYNAMICNESS,dynamicness[i*w+j]+1);
 					bool next_to_top  = abs(data[i*w+j] - data[(i-1)*w+j]) < CLUSTER_THRESHOLD && cluster_num[(i-1)*w+j] != 0;
 					bool next_to_left = abs(data[i*w+j] - data[i*w+j-1]) < CLUSTER_THRESHOLD && cluster_num[i*w+j-1] != 0;
 					x = cluster_num[(i-1)*w+j];
@@ -472,12 +489,18 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 			}
 		}
 
-		//uint16_t image_clusters[h*w];
-		//for(i=0; i<h; i++)
-		//	for(j=0; j<w; j++)
-		//		image_clusters[i*w+j] = cluster_num[i*w+j];
-
-		// Suppression du bruit		
+		// Suppression du bruit
+		for(i=0;i<h;i++){
+			for(j=0;j<w;j++){
+				// Si le pixel n'a pas de dynamicité, il vire
+				if(dynamicness[i*w+j] <= DYNAMICNESS_THRESHOLD){
+				 	clusters[cluster_num[i*w+j]].size --;
+				 	if(clusters[cluster_num[i*w+j]].size == 0)
+						nb_clusters--;
+				 	cluster_num[i*w+j] = 0;
+				}
+			}
+		}
 		for(i=0;i<h;i++){
 			for(j=0;j<w;j++){
 				// Si c'est un petit cluster, il est considéré comme du bruit.
@@ -489,23 +512,6 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 				}
 			}
 		}
-		//for(i=0;i<h;i++){
-		//	for(j=0;j<w;j++){
-		//		// Si c'est un point présent sur 1 seule frame, il est considéré comme du bruit.
-		//		// TODO a voir si le framerate est suffisant
-		//		if(prev_image_clusters[i*w+j] == 0 && cluster_num[i*w+j] != 0){
-		//			cluster_num[i*w+j] = 0;
-		//		 	if(clusters[cluster_num[i*w+j]].size == 0)
-		//				nb_clusters--;
-		//		 	cluster_num[i*w+j] = 0;
-		//		}
-		//	}
-		//}
-		
-		//for(i=0; i<h; i++)
-		//	for(j=0; j<w; j++)
-		//		prev_image_clusters[i*w+j] = image_clusters[i*w+j];
-	
 	
 		sensor_msgs::Image clst;
 		clst.header.stamp = ros::Time::now();
@@ -527,7 +533,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		publish_person(cluster_num,n,clusters,data);
 	
 	}
-				
+	
 	publish_background(img);
 }
 

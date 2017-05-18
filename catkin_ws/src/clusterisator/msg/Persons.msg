@@ -4,4 +4,5 @@ uint8 MOVING_PERSON=2
 uint8 ROBOT=3
 bool there_is_a_robot
 uint8 nb_persons
+uint8 resolution_factor
 sensor_msgs/Image img

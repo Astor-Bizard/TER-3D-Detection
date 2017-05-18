@@ -23,6 +23,8 @@ ros::Publisher recieved_data_pub;
 
 uint32_t h,w;
 
+int resolution_factor;
+
 double f;
 double cx,cy;
 
@@ -62,9 +64,12 @@ void collect_robot_data(const clusterisator::Persons::ConstPtr& img_persons){
 	recieved_data_pub.publish(img);
 
 	uint32_t i,j;
+	
+	resolution_factor = img_persons->resolution_factor;
 
 	bool found_robot = false;
 	int i_robot = 0;
+	
 	geometry_msgs::Point min_robot,max_robot;
 	for(i=0;i<h;i++){
 		for(j=0;j<w;j++){
@@ -73,12 +78,14 @@ void collect_robot_data(const clusterisator::Persons::ConstPtr& img_persons){
 			if(type == img_persons->ROBOT){
 				geometry_msgs::Point current = depth_to_cartesian(i,j,depth);
 				if(!found_robot){
-					min_robot.x = current.x;
-					min_robot.y = current.y;
-					min_robot.z = current.z;
-					max_robot.x = current.x;
-					max_robot.y = current.y;
-					max_robot.z = current.z;
+					min_robot = current;
+					max_robot = current;
+					//min_robot.x = current.x;
+					//min_robot.y = current.y;
+					//min_robot.z = current.z;
+					//max_robot.x = current.x;
+					//max_robot.y = current.y;
+					//max_robot.z = current.z;
 					found_robot = true;
 				}
 				else{
@@ -102,7 +109,7 @@ void collect_robot_data(const clusterisator::Persons::ConstPtr& img_persons){
 	//   / z
 	//  v
 	if(found_robot){
-		ROS_INFO("Found robot of size %d between (%f,%f,%f) and (%f,%f,%f)",i_robot, min_robot.x,min_robot.y,min_robot.z,max_robot.x,max_robot.y,max_robot.z);
+		ROS_INFO("Found robot at position (%f,%f,%f)", (3*max_robot.x-min_robot.x)/2.0f, (3*max_robot.y-min_robot.y)/2.0f, (3*max_robot.z-min_robot.z)/2.0f);
 		ROS_INFO("Robot size : (%f,%f,%f)",(max_robot.x-min_robot.x),(max_robot.y-min_robot.y),(max_robot.z-min_robot.z));
 	}
 }
