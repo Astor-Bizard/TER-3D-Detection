@@ -29,14 +29,9 @@
 #define MAX_PERSONS_NB 100
 
 #define DO_OPTI true
-#define T_OPTI 3 // taille du carré d'optimisation
+#define T_OPTI 2 // taille du carré d'optimisation
 
-#define CLUSTER_NOISE_SIZE 150	// seems nice to be 1200/(T_OPTI²)
-
-#define STATIC_OBJECT 0
-#define MOVING_OBJECT 1
-#define MOVING_PERSON 2
-#define ROBOT         3
+#define CLUSTER_NOISE_SIZE 300	// seems nice to be 1200/(T_OPTI²)
 
 uint32_t max2(uint32_t a, uint32_t b){
 	return a>b ? a : b;
@@ -188,6 +183,7 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	// Image of data - for each pixel :
 	// original depth on 16 bits (in the original format)
 	// last 8 bits : 0 if static, 1 if moving, 2 if person, 3 if robot
+	clusterisator::Persons msg_person;
 	sensor_msgs::Image img_person;
 	img_person.header.stamp = ros::Time::now();
 	img_person.header.frame_id = PERSON_FRAME_ID;
@@ -233,7 +229,7 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 						persons[nb_persons].width = c_width;
 						persons[nb_persons].height = c_height;
 					}
-					img_person.data.push_back((uint8_t) MOVING_PERSON);
+					img_person.data.push_back(msg_person.MOVING_PERSON);
 					// Person : red
 					img_rgb_person.data.push_back((uint8_t)255);
 					img_rgb_person.data.push_back((uint8_t)0);
@@ -243,14 +239,14 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 					if(cluster_robot == c_n || (cluster_robot == 0 && abs(i-(h/2)) < (h/10) && abs(j-(w/2)) < (w/10))){
 						cluster_robot = c_n;
 						// A moving object in the center of the view : it's the robot
-						img_person.data.push_back((uint8_t) ROBOT);
+						img_person.data.push_back(msg_person.ROBOT);
 						// Robot : yellow
 						img_rgb_person.data.push_back((uint8_t)255);
 						img_rgb_person.data.push_back((uint8_t)255);
 						img_rgb_person.data.push_back((uint8_t)0);
 					}
 					else{
-						img_person.data.push_back((uint8_t) MOVING_OBJECT);
+						img_person.data.push_back(msg_person.MOVING_OBJECT);
 						// Not a person : green
 						img_rgb_person.data.push_back((uint8_t)0);
 						img_rgb_person.data.push_back((uint8_t)255);
@@ -259,7 +255,7 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 				}
 			}
 			else{
-				img_person.data.push_back((uint8_t) STATIC_OBJECT);
+				img_person.data.push_back(msg_person.STATIC_OBJECT);
 				// Background : blue
 				img_rgb_person.data.push_back((uint8_t)0);
 				img_rgb_person.data.push_back((uint8_t)0);
@@ -272,7 +268,6 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	//for(i=1;i<=nb_persons;i++){
 	//	ROS_INFO("Person %d at dist %d : width %d and height %d",i,persons[i].dist,persons[i].width,persons[i].height);
 	//}
-	clusterisator::Persons msg_person;
 	msg_person.there_is_a_robot = (cluster_robot != 0);
 	msg_person.nb_persons = nb_persons;
 	msg_person.img = img_person;
