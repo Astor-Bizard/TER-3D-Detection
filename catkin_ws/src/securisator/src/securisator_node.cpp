@@ -28,7 +28,16 @@ int resolution_factor;
 double f;
 double cx,cy;
 
-std::vector<geometry_msgs::Point> robot;
+struct robot_t{
+	geometry_msgs::Point pt_min_x;
+	geometry_msgs::Point pt_min_y;
+	geometry_msgs::Point pt_min_z;
+	geometry_msgs::Point pt_max_x;
+	geometry_msgs::Point pt_max_y;
+	geometry_msgs::Point pt_max_z;
+};
+
+struct robot_t robot;
 
 public:
 
@@ -68,36 +77,43 @@ void collect_robot_data(const clusterisator::Persons::ConstPtr& img_persons){
 	resolution_factor = img_persons->resolution_factor;
 
 	bool found_robot = false;
-	int i_robot = 0;
 	
-	geometry_msgs::Point min_robot,max_robot;
+	uint8_t data_type[h*w];
+	uint16_t data_depth[h*w];
+	
 	for(i=0;i<h;i++){
 		for(j=0;j<w;j++){
-			uint8_t type = img.data[i*3*w+j*3+2];
-			uint16_t depth = (img.data[i*3*w + j*3 + 1] << 8) + img.data[i*3*w + j*3];
+			data_type[i*w+j] = img.data[i*3*w+j*3+2];
+			data_depth[i*w+j] = (img.data[i*3*w + j*3 + 1] << 8) + img.data[i*3*w + j*3];
+		}
+	}
+	
+	geometry_msgs::Point cartesian_map[h*w];
+	uint32_t index_min_x, index_min_y, index_min_z, index_max_x, index_max_y, index_max_z;
+	
+	for(i=0;i<h;i++){
+		for(j=0;j<w;j++){
+			uint8_t type = data_type[i*w+j];
+			uint16_t depth = data_depth[i*w+j];
 			if(type == img_persons->ROBOT){
 				geometry_msgs::Point current = depth_to_cartesian(i,j,depth);
+				cartesian_map[i*w+j] = current;
 				if(!found_robot){
-					min_robot = current;
-					max_robot = current;
-					//min_robot.x = current.x;
-					//min_robot.y = current.y;
-					//min_robot.z = current.z;
-					//max_robot.x = current.x;
-					//max_robot.y = current.y;
-					//max_robot.z = current.z;
+					index_min_x = index_max_x =
+					index_min_y = index_max_y =
+					index_min_z = index_max_z =
+												i*w+j;
 					found_robot = true;
 				}
 				else{
-					min_robot.x = fmin(current.x,min_robot.x);
-					min_robot.y = fmin(current.y,min_robot.y);
-					min_robot.z = fmin(current.z,min_robot.z);
-					max_robot.x = fmax(current.x,max_robot.x);
-					max_robot.y = fmax(current.y,max_robot.y);
-					max_robot.z = fmax(current.z,max_robot.z);
+					#define MAJ_INDEX(INDEX,XYZ,CMP) INDEX = cartesian_map[INDEX].XYZ CMP current.XYZ ? INDEX : i*w+j;
+					MAJ_INDEX(index_min_x,x,<);
+					MAJ_INDEX(index_min_y,y,<);
+					MAJ_INDEX(index_min_z,z,<);
+					MAJ_INDEX(index_max_x,x,>);
+					MAJ_INDEX(index_max_y,y,>);
+					MAJ_INDEX(index_max_z,z,>);
 				}
-				robot.push_back(current);
-				i_robot++;
 			}
 		}
 	}
@@ -108,9 +124,17 @@ void collect_robot_data(const clusterisator::Persons::ConstPtr& img_persons){
 	//    /
 	//   / z
 	//  v
+	
+	robot.pt_min_x = cartesian_map[index_min_x];
+	robot.pt_min_y = cartesian_map[index_min_y];
+	robot.pt_min_z = cartesian_map[index_min_z];
+	robot.pt_max_x = cartesian_map[index_max_x];
+	robot.pt_max_y = cartesian_map[index_max_y];
+	robot.pt_max_z = cartesian_map[index_max_z];
+	
 	if(found_robot){
-		ROS_INFO("Found robot at position (%f,%f,%f)", (3*max_robot.x-min_robot.x)/2.0f, (3*max_robot.y-min_robot.y)/2.0f, (3*max_robot.z-min_robot.z)/2.0f);
-		ROS_INFO("Robot size : (%f,%f,%f)",(max_robot.x-min_robot.x),(max_robot.y-min_robot.y),(max_robot.z-min_robot.z));
+		ROS_INFO("Found robot at position (%f,%f,%f)", robot.pt_min_x.x + (robot.pt_max_x.x-robot.pt_min_x.x)/2.0f, robot.pt_min_y.y + (robot.pt_max_y.y-robot.pt_min_y.y)/2.0f, robot.pt_min_z.z + (robot.pt_max_z.z-robot.pt_min_z.z)/2.0f);
+		ROS_INFO("Robot size : (%f,%f,%f)",(robot.pt_max_x.x-robot.pt_min_x.x),(robot.pt_max_y.y-robot.pt_min_y.y),(robot.pt_max_z.z-robot.pt_min_z.z));
 	}
 }
 
@@ -135,13 +159,18 @@ void personImageCallback(const clusterisator::Persons::ConstPtr& img_persons){
 				uint16_t depth = (img.data[i*3*w + j*3 + 1] << 8) + img.data[i*3*w + j*3];
 				if(type == img_persons->MOVING_PERSON){
 					geometry_msgs::Point p = depth_to_cartesian(i,j,depth);
-					for(k=0; k<robot.size() && !danger; k++){
-						uint16_t dist = distance(p,robot[k]);
-						if(dist < SECURITY_DISTANCE){
-							ROS_WARN("BAAAAH ATTENTION ! Distance : %d",dist);
-							danger = true;
-						}
-					}
+					uint16_t dist;
+					#define CHECK_DISTANCE_WITH_P(PT)	dist = distance(p,PT);\
+														if(dist < SECURITY_DISTANCE){\
+															ROS_WARN("BAAAAH ATTENTION ! Distance : %d",dist);\
+															danger = true;\
+														}
+					CHECK_DISTANCE_WITH_P(robot.pt_min_x);
+					CHECK_DISTANCE_WITH_P(robot.pt_min_y);
+					CHECK_DISTANCE_WITH_P(robot.pt_min_z);
+					CHECK_DISTANCE_WITH_P(robot.pt_max_x);
+					CHECK_DISTANCE_WITH_P(robot.pt_max_y);
+					CHECK_DISTANCE_WITH_P(robot.pt_max_z);
 				}
 			}
 		}
