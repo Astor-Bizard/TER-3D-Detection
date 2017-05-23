@@ -10,31 +10,31 @@
 #define PERSON_IMG_TOPIC "/clusterisator/person"
 #define CAMERA_INFO_TOPIC "/depth/camera_info"
 
-#define RECIEVED_DATA_TOPIC "/securisator/recieved_data"
+#define SECURITY_DISTANCE 100 // in mm
 
-#define SECURITY_DISTANCE 100
 
 class Securisator {
 
 private:
 ros::Subscriber person_img_sub;
 ros::Subscriber camera_info_sub;
-ros::Publisher recieved_data_pub;
 
 uint32_t h,w;
 
 int resolution_factor;
 
+bool camera_info_ok;
 double f;
 double cx,cy;
 
+#define NB_PoI_ROBOT 6
 #define I_MIN_X 0
 #define I_MIN_Y 1
 #define I_MIN_Z 2
 #define I_MAX_X 3
 #define I_MAX_Y 4
 #define I_MAX_Z 5
-geometry_msgs::Point robot[6];
+geometry_msgs::Point robot[NB_PoI_ROBOT];
 
 uint8_t CODE_STATIC_OBJECT;
 uint8_t CODE_MOVING_OBJECT;
@@ -53,14 +53,41 @@ Securisator(){
 	person_img_sub = nh.subscribe(PERSON_IMG_TOPIC, 1, &Securisator::personImageCallback, this);
 	camera_info_sub = nh.subscribe(CAMERA_INFO_TOPIC, 1, &Securisator::cameraInfoCallback, this);
 	
-	recieved_data_pub = nh.advertise<sensor_msgs::Image>(RECIEVED_DATA_TOPIC, 5);
+	camera_info_ok = false;
 
 }
 
 void cameraInfoCallback(const sensor_msgs::CameraInfo::ConstPtr& camera_info){
-	f = camera_info->K[0];
-	cx = camera_info->K[2];
-	cy = camera_info->K[5];
+	if(!camera_info_ok){
+		f = camera_info->K[0];
+		cx = camera_info->K[2];
+		cy = camera_info->K[5];
+		camera_info_ok = true;
+	}
+}
+
+void init_data(const clusterisator::Persons::ConstPtr& img_persons){
+	const sensor_msgs::Image img = img_persons->img;
+	
+	h = img.height;
+	w = img.width;
+	
+	resolution_factor = img_persons->resolution_factor;
+	
+	CODE_STATIC_OBJECT = img_persons->STATIC_OBJECT;
+	CODE_MOVING_OBJECT = img_persons->MOVING_OBJECT;
+	CODE_MOVING_PERSON = img_persons->MOVING_PERSON;
+	CODE_ROBOT = img_persons->ROBOT;
+	
+	data_type.clear();
+	data_depth.clear();
+	uint32_t i,j;
+	for(i=0;i<h;i++){
+		for(j=0;j<w;j++){
+			data_type.push_back(img.data[i*3*w+j*3+2]);
+			data_depth.push_back((img.data[i*3*w + j*3 + 1] << 8) + img.data[i*3*w + j*3]);
+		}
+	}
 }
 
 geometry_msgs::Point depth_to_cartesian(int x, int y, uint16_t depth){
@@ -75,25 +102,26 @@ void collect_robot_data(){
 
 	uint32_t i,j;
 	
-	geometry_msgs::Point cartesian_map[h*w];	
-	uint32_t index_in_cartesian_map[6];
+	geometry_msgs::Point cartesian_map[h*w];
+	uint32_t robot_index_in_cartesian_map[NB_PoI_ROBOT];
 	
 	bool found_robot = false;
 	for(i=0;i<h;i++){
 		for(j=0;j<w;j++){
 			uint8_t type = data_type[i*w+j];
-			uint16_t depth = data_depth[i*w+j];
 			if(type == CODE_ROBOT){
+				// Calcul des points d'intéret du robot
+				uint16_t depth = data_depth[i*w+j];
 				geometry_msgs::Point current = depth_to_cartesian(i,j,depth);
 				cartesian_map[i*w+j] = current;
 				if(!found_robot){
-					for(short int k=0;k<6;k++)
-						index_in_cartesian_map[k] = i*w+j;
+					for(short int k=0;k<NB_PoI_ROBOT;k++)
+						robot_index_in_cartesian_map[k] = i*w+j;
 					
 					found_robot = true;
 				}
 				else{
-					#define MAJ_INDEX(INDEX,XYZ,CMP) index_in_cartesian_map[INDEX] = cartesian_map[index_in_cartesian_map[INDEX]].XYZ CMP current.XYZ ? index_in_cartesian_map[INDEX] : i*w+j;
+					#define MAJ_INDEX(INDEX,XYZ,CMP) robot_index_in_cartesian_map[INDEX] = cartesian_map[robot_index_in_cartesian_map[INDEX]].XYZ CMP current.XYZ ? robot_index_in_cartesian_map[INDEX] : i*w+j;
 					MAJ_INDEX(I_MIN_X,x,<);
 					MAJ_INDEX(I_MIN_Y,y,<);
 					MAJ_INDEX(I_MIN_Z,z,<);
@@ -112,12 +140,12 @@ void collect_robot_data(){
 	//   / z
 	//  v
 	
-	for(short int k=0;k<6;k++)
-		robot[k] = cartesian_map[index_in_cartesian_map[k]];
+	for(short int k=0;k<NB_PoI_ROBOT;k++)
+		robot[k] = cartesian_map[robot_index_in_cartesian_map[k]];
 	
 	if(found_robot){
 		ROS_INFO("Found robot at position (%f,%f,%f)", robot[I_MIN_X].x + (robot[I_MAX_X].x-robot[I_MIN_X].x)/2.0f, robot[I_MIN_Y].y + (robot[I_MAX_Y].y-robot[I_MIN_Y].y)/2.0f, robot[I_MIN_Z].z + (robot[I_MAX_Z].z-robot[I_MIN_Z].z)/2.0f);
-		ROS_INFO("Robot size : (%f,%f,%f)",(robot[I_MAX_X].x-robot[I_MIN_X].x),(robot[I_MAX_Y].y-robot[I_MIN_Y].y),(robot[I_MAX_Z].z-robot[I_MIN_Z].z));
+		ROS_INFO("Robot size : %fmm x %fmm x %fmm",(robot[I_MAX_X].x-robot[I_MIN_X].x)*resolution_factor,(robot[I_MAX_Y].y-robot[I_MIN_Y].y)*resolution_factor,(robot[I_MAX_Z].z-robot[I_MIN_Z].z)*resolution_factor);
 	}
 }
 
@@ -130,6 +158,9 @@ void check_security_distance(){
 	uint32_t i,j;
 	
 	bool danger = false;
+	
+	int security_distance = SECURITY_DISTANCE/resolution_factor;
+	
 	for(i=0;i<h && !danger;i++){
 		for(j=0;j<w && !danger;j++){
 			uint8_t type = data_type[i*w+j];
@@ -137,9 +168,9 @@ void check_security_distance(){
 			if(type == CODE_MOVING_PERSON){
 				geometry_msgs::Point p = depth_to_cartesian(i,j,depth);
 				uint16_t dist;
-				for(short int k=0; k<6 && !danger; k++){
+				for(short int k=0; k<NB_PoI_ROBOT && !danger; k++){
 					dist = distance(p,robot[k]);
-					if(dist < SECURITY_DISTANCE){
+					if(dist < security_distance){
 						ROS_WARN("BAAAAH ATTENTION ! Distance : %d",dist);
 						danger = true;
 					}
@@ -151,34 +182,18 @@ void check_security_distance(){
 
 void personImageCallback(const clusterisator::Persons::ConstPtr& img_persons){
 	
-	const sensor_msgs::Image img = img_persons->img;
-	
-	recieved_data_pub.publish(img);
-	
-	h = img.height;
-	w = img.width;
-	
-	resolution_factor = img_persons->resolution_factor;
-	
-	CODE_STATIC_OBJECT = img_persons->STATIC_OBJECT;
-	CODE_MOVING_OBJECT = img_persons->MOVING_OBJECT;
-	CODE_MOVING_PERSON = img_persons->MOVING_PERSON;
-	CODE_ROBOT = img_persons->ROBOT;
-	
 	if(img_persons->there_is_a_robot){
 	
-		uint32_t i,j;
-		for(i=0;i<h;i++){
-			for(j=0;j<w;j++){
-				data_type.push_back(img.data[i*3*w+j*3+2]);
-				data_depth.push_back((img.data[i*3*w + j*3 + 1] << 8) + img.data[i*3*w + j*3]);
-			}
+		if(!camera_info_ok){
+			ROS_INFO("Pending for camera_info...");
 		}
-	
-		collect_robot_data();
-
-		check_security_distance();
-		
+		else{
+			init_data(img_persons);
+			
+			collect_robot_data();
+			
+			check_security_distance();
+		}
 	}
 }
 

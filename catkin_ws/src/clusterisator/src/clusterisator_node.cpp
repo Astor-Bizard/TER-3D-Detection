@@ -34,14 +34,8 @@
 #define T_OPTI 2 // taille du carré d'optimisation
 
 #define CLUSTER_NOISE_SIZE 300	// seems nice to be 1200/(T_OPTI²)
-/*
-uint16_t max2(uint16_t a, uint16_t b){
-	return a>b ? a : b;
-}
-uint16_t min2(uint16_t a, uint16_t b){
-	return a<b ? a : b;
-}
-*/
+
+
 uint32_t max2(uint32_t a, uint32_t b){
 	return a>b ? a : b;
 }
