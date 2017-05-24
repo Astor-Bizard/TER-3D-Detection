@@ -1,7 +1,7 @@
 #include "ros/ros.h"
 #include "sensor_msgs/Image.h"
 
-#include "../../../devel/include/clusterisator/Persons.h"
+#include "../../../devel/include/perception_msgs/Persons.h"
 
 #include <cmath>
 #include <sstream>
@@ -114,7 +114,7 @@ Clusterisator(){
 #endif
 	background_publisher = nh.advertise<sensor_msgs::Image>(BACKGROUND_TOPIC, 5);
 	
-	person_publisher = nh.advertise<clusterisator::Persons>(PERSON_TOPIC, 5);
+	person_publisher = nh.advertise<perception_msgs::Persons>(PERSON_TOPIC, 5);
 	rgb_person_publisher = nh.advertise<sensor_msgs::Image>(RGB_PERSON_TOPIC, 5);
 
 	img_sub = nh.subscribe(CAMERA_DEPTH_TOPIC, 1, &Clusterisator::depthImageCallback, this);
@@ -188,7 +188,7 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	// Image of data - for each pixel :
 	// original depth on 16 bits (in the original format)
 	// last 8 bits : 0 if static, 1 if moving, 2 if person, 3 if robot
-	clusterisator::Persons msg_person;
+	perception_msgs::Persons msg_person;
 	sensor_msgs::Image img_person;
 	img_person.header.stamp = ros::Time::now();
 	img_person.header.frame_id = PERSON_FRAME_ID;

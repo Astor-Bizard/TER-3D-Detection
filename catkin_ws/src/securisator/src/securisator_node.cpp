@@ -3,7 +3,7 @@
 #include "sensor_msgs/CameraInfo.h"
 #include "geometry_msgs/Point.h"
 
-#include "../../../devel/include/clusterisator/Persons.h"
+#include "../../../devel/include/perception_msgs/Persons.h"
 
 #include <math.h>
 
@@ -66,7 +66,7 @@ void cameraInfoCallback(const sensor_msgs::CameraInfo::ConstPtr& camera_info){
 	}
 }
 
-void init_data(const clusterisator::Persons::ConstPtr& img_persons){
+void init_data(const perception_msgs::Persons::ConstPtr& img_persons){
 	const sensor_msgs::Image img = img_persons->img;
 	
 	h = img.height;
@@ -180,7 +180,7 @@ void check_security_distance(){
 	}
 }
 
-void personImageCallback(const clusterisator::Persons::ConstPtr& img_persons){
+void personImageCallback(const perception_msgs::Persons::ConstPtr& img_persons){
 	
 	if(img_persons->there_is_a_robot){
 	
