@@ -16,6 +16,7 @@
 \usepackage{subcaption}
 \usepackage{algorithm}
 \usepackage{algorithmic}
+\usepackage{float}
 
 \title{TER Report - Interior 3D detection in a cobotics context}
 
@@ -31,8 +32,15 @@
 \begin{document}
 \maketitle
 
+
+\renewcommand{\abstractname}{Acknowledgement}
 \begin{abstract}
-We present an approach to compute 3D data in a real-time security context to evaluate distance between humans and robots. The implementation is oriented to be compatible with the ROS platform, and overcome drawbacks of low-quality depth cameras, such as important noise.
+This report is the result of a TER research internship at Université Grenoble Alpes, Grenoble, France.
+\end{abstract}
+\\
+\renewcommand{\abstractname}{Abstract}
+\begin{abstract}
+We present an approach to compute 3D data in a real-time security context to evaluate distance between humans and robots. The implementation is oriented to be compatible with the ROS platform, and overcome drawbacks of low-quality depth cameras, such as important noise. It is meant to function without the robot broadcasting its position, therefore only by perception.
 \keywords{3D Depth Sensor \and RGB-D Perception \and Collision Avoidance \and ROS \and Physical Human-Robot Interaction}
 \end{abstract}
 
@@ -64,6 +72,7 @@ A different an more reliable way to get informations is to place static sensors.
 \subsection{The ROS API}
 
 One of the most used API in the world of robotics is the ROS platform. It works as a set of executables, named nodes, which communicate with messages published on topics. The advantage of this platform is that it provides a standardized API for communicating with autonomous robots. In our case, we present a solution with two nodes, added to the sensor node : the first one will be charged to analyze the data provided by the sensor, identifying moving objects and persons ; the second one will check - from the information given by the first node - that the human security is not compromised.
+Person detection and tracking is a common problem, however the only public ROS node which provided person tracking for the model of camera we are using is not maintained anymore for the newest versions of the platform.
 
 \section{The Clustering node}
 
@@ -171,7 +180,7 @@ However, there is still noise giving non-zero depth values, especially on far aw
         \centering
         \includegraphics[height=0.8\textwidth]{camera_01.png}
         \caption{\label{fig:camera1}The depth image, as received by the camera : dark points are near the camera, bright ones are far.}
-    \end{subfigure}
+    \end{subfigure}%
     ~ 
     \begin{subfigure}[t]{0.5\textwidth}
         \centering
@@ -189,12 +198,32 @@ However, there is still noise giving non-zero depth values, especially on far aw
 
 \subsection{Identification}
 
-Once we separated the several objects in the image, we need to identify persons and robots. AFZERJHGFSQDFKJDSF TODO
+Once we separated the several objects in the image, we need to identify persons and robots. In our case persons are identified only with their size - if it is a moving object, around 1m75 tall, and around 50cm wide, it must be a person. This is to be adapted with the situation : if a robot is 1m75 tall, or manipulates objects of this size, we need another method of identification (cf Section \ref{sect:futurework}).
+The identification of the robot induce the same kind of problems and has not been resolved during the internship.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.5\linewidth]{camera_03.png}
+\caption{\label{fig:background3}The background stored at the beginning.}
+\end{figure}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.5\linewidth]{camera_person_02.png}
+\caption{\label{fig:cameraperson2}An image recorded while a person, the robot and an object were in the field of view.}
+\end{figure}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.5\linewidth]{clusters_person_02.png}
+\caption{\label{fig:clustersperson2}The separation between static objects (in blue), moving ones (in green), and persons (in red).}
+\end{figure}
 
 \section{The Distance-computing node}
 
-The second node is in charge to compute the distance between each person and the robot. It receives data from the clustering node in the depth space, however distance computing is far easier in a cartesian space, thus we transpose coordinates in this space. The transposition of a point $P_d$ in the depth space to a point $P_c$ in the cartesian space is given by \[{P_c}_x = \frac{({P_d}_x-c_x){P_d}_z}{fs_x}, {P_c}_y = \frac{({P_d}_y-c_y){P_d}_z}{fs_y}, {P_c}_z = {P_d}_z \text{ \cite{Ref1}} \]
-where $f,s_x,s_y,c_x,c_y$ are calibration data from the depth sensor (focal length, size of a pixel and coordinates of the focal axis in the image plane).
+The second node is in charge to compute the distance between each person and the robot. It receives data from the clustering node in the depth space, however distance computing is far easier in a cartesian space (cf Fig. \ref{fig:spaces}), thus we transpose coordinates in this space. The transposition of a point $P_d$ in the depth space to a point $P_c$ in the cartesian space is given by \[{P_c}_x = \frac{({P_d}_x-c_x){P_d}_z}{fs_x}, {P_c}_y = \frac{({P_d}_y-c_y){P_d}_z}{fs_y}, {P_c}_z = {P_d}_z \text{ \cite{Ref1}} \]
+where $f,s_x,s_y,c_x,c_y$ are calibration data from the depth sensor (focal length, size of a pixel and coordinates of the focal axis in the image plane) \cite{Ref1}.
+All it is left to do is to compute the distance between each point of the person and each point of the robot. However, this method leads to very important treatment time (30 seconds per frame when one person is in the field of view). We thus need to reduce the number of points to compute. One way is too first reduce the size of the image, by sampling it - but it could have consequences on precision. An other and more widely used way is to reduce the number of points of the robot to only a sample of points of interest - for example one point at each articulation of the robot. As we know the shape of the robot, we can choose these points in order to ensure the same security. If a person is too close from one of these points, a message is sent to the robot to stop.
 
 \begin{figure}
 \centering
@@ -202,64 +231,20 @@ where $f,s_x,s_y,c_x,c_y$ are calibration data from the depth sensor (focal leng
 \caption{\label{fig:spaces}Representation of Cartesian space (a) and Depth space (b) \cite{Ref1}.}
 \end{figure}
 
-\section*{Acknowledgement}
-This report is the result of a TER research internship at Université Grenoble Alpes, Grenoble, France.
+\section{\label{sect:futurework}Future work perspectives}
 
-%\subsection{How to add Tables}
+Model-based identification should be the main improvement to bring to the work done in the internship. It can be done with only depth data (by expliciting the depth grid) or along with the RGB image - however, correspondence between RGB and depth data is reliable only in a range between 1.5 and 4 meters from the camera. This kind of identification will lead to easier sampling of the points of the robot - and eventually the persons, as we may know the global shape and the articulations of a human.
 
-%Use the table and tabular commands for basic tables --- see Table~\ref{tab:widgets}, for example. 
-
-%\begin{table}
-%\centering
-%\begin{tabular}{l|r}
-%Item & Quantity \\\hline
-%Widgets & 42 \\
-%Gadgets & 13
-%\end{tabular}
-%\caption{\label{tab:widgets}An example table.}
-%\end{table}
-
-%\subsection{How to write Mathematics}
-
-%\LaTeX{} is great at typesetting mathematics. Let $X_1, X_2, \ldots, X_n$ be a sequence of independent and identically distributed random variables with $\text{E}[X_i] = \mu$ and $\text{Var}[X_i] = \sigma^2 < \infty$, and let
-%\[S_n = \frac{X_1 + X_2 + \cdots + X_n}{n}
-%      = \frac{1}{n}\sum_{i}^{n} X_i\]
-%denote their mean. Then as $n$ approaches infinity, the random variables $\sqrt{n}(S_n - \mu)$ converge in distribution to a normal $\mathcal{N}(0, \sigma^2)$.
-
-
-%\subsection{How to create Sections and Subsections}
-
-%Use section and subsections to organize your document. Simply use the section and subsection buttons in the toolbar to create them, and we'll handle all the formatting and numbering automatically.
-
-%\subsection{How to add Lists}
-
-%You can make lists with automatic numbering \dots
-
-%\begin{enumerate}
-%\item Like this,
-%\item and like this.
-%\end{enumerate}
-%\dots or bullet points \dots
-%\begin{itemize}
-%\item Like this,
-%\item and like this.
-%\end{itemize}
-
-%\subsection{How to add Citations and a References List}
-
-%You can upload a \verb|.bib| file containing your BibTeX entries, created with JabRef; or import your \href{https://www.overleaf.com/blog/184}{Mendeley}, CiteULike or Zotero library as a \verb|.bib| file. You can then cite entries from it, like this: \cite{greenwade93}. Just remember to specify a bibliography style, as well as the filename of the \verb|.bib|.
-
-%You can find a \href{https://www.overleaf.com/help/97-how-to-include-a-bibliography-using-bibtex}{video tutorial here} to learn more about BibTeX.
-
-%We hope you find Overleaf useful, and please let us know if you have any feedback using the help menu above --- or use the contact form at \url{https://www.overleaf.com/contact}!
-
-%\bibliographystyle{alpha}
-%\bibliography{sample}
 \begin{thebibliography}{}
+
+\bibitem{Refopenni}
+ROS OpenNi node for the Kinect :
+http://wiki.ros.org/openni\_camera
 
 \bibitem{Ref1}
 F. Flacco and A. De Luca, Real-time computation of distance to dynamic obstacles with multiple depth sensors, IEEE Robotics and automation Letters (2016).
-http://comanoid.cnrs.fr/publications\_files/2017/IEEE\_Robotics\_and\_Automation\_Letters/RAL2016\_MultiDepth\_preprint.pdf
+http://comanoid.cnrs.fr/publications\_files/2017/IEEE\_Robotics\_and\_Automation\_Letters/
+RAL2016\_MultiDepth\_preprint.pdf
 
 \bibitem{Ref2}
 F. Flacco, T. Kröger, A. De Luca and O. Khatib, A depth space approach for evaluating distance to objects, J. of Intelligent and Robotic Systems, vol. 80 (suppl. 1), pp 7-22 (2015).
@@ -284,8 +269,13 @@ http://www.enme.umd.edu/\textasciitilde skgupta/Publication/JCISE2013\_Morato\_d
 N. Najmaei and M. Kermani, Prediction-based reactive control strategy for human-robot interactions, IEEE Int. Conf. on Robotics and Automation (ICRA), pp. 3434–3439 (2010).
 https://pdfs.semanticscholar.org/19b6/b377548396e47c90d5c5ea6630a265016a22.pdf
 
-\bibitem{Refopenni}
-http://wiki.ros.org/openni\_camera
+\bibitem{Ref8}
+Z. Zhang, Microsoft Kinect sensor and its effect, IEEE MultiMedia, vol. 19, no. 2, pp. 4–10 (2012).
+http://ieeexplore.ieee.org/document/6190806
+
+\bibitem{Ref9}
+T. Gecks and D. Henrich, Human-robot cooperation : Safe pick-and-place operations, Proc. IEEE Int. Works on Robot and Human Interactive Communication, pp 549-554 (2005).
+http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.91.856\&rep=rep1\&type=pdf
 
 \end{thebibliography}
 
