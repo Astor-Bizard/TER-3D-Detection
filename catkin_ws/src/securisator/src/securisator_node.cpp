@@ -90,6 +90,7 @@ void init_data(const perception_msgs::Persons::ConstPtr& img_persons){
 	}
 }
 
+// Transposition from depth space to cartesian space
 geometry_msgs::Point depth_to_cartesian(int x, int y, uint16_t depth){
 	geometry_msgs::Point p;
 	p.x = ((x-cx)*depth)/f;
