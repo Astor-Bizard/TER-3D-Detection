@@ -3,7 +3,7 @@
 #include "sensor_msgs/CameraInfo.h"
 #include "geometry_msgs/Point.h"
 
-#include "../../../devel/include/perception_msgs/Persons.h"
+#include "perception_msgs/Persons.h"
 
 #include <math.h>
 

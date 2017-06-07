@@ -1,7 +1,7 @@
 #include "ros/ros.h"
 #include "sensor_msgs/Image.h"
 
-#include "../../../devel/include/perception_msgs/Persons.h"
+#include "perception_msgs/Persons.h"
 
 #include <cmath>
 #include <sstream>
@@ -23,18 +23,26 @@
 #define RGB_PERSON_TOPIC "/clusterisator/rgb_person"
 #define RGB_PERSON_FRAME_ID "/clusterisator_rgb_person_frame"
 
-#define STATIC_THRESHOLD 50
-#define CLUSTER_THRESHOLD 80
+#define STATIC_THRESHOLD 50	    // the minimum distance (in mm) between moving objects and the background
+#define CLUSTER_THRESHOLD 80	// the maximum depth diff between two pixels (in mm) for them to be in the same cluster
 #define MAX_CLUSTERS_NB 65535
 #define MAX_PERSONS_NB 100
-#define MAX_DYNAMICNESS 5
-#define DYNAMICNESS_THRESHOLD 3
+
+#define MAX_RANGE 10000    // the maximum reliable range of the camera
+
+//#define MAX_DYNAMICNESS 5
+//#define DYNAMICNESS_THRESHOLD 3
 
 #define DO_OPTI true
 #define T_OPTI 2 // taille du carré d'optimisation
 
 #define CLUSTER_NOISE_SIZE 300	// seems nice to be 1200/(T_OPTI²)
 
+/*
+#define FREE 0
+#define OBSTACLE 1
+#define UKNOWN 2
+*/
 
 uint32_t max2(uint32_t a, uint32_t b){
 	return a>b ? a : b;
@@ -333,6 +341,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 #endif
 
 	uint16_t cluster_num[h*w];
+	//uint8_t grid[MAX_RANGE][h][w]; // Size problem here (4000x320x240 -> 307Mo)
 	
 	if(first_pass){
 		first_pass = false;
@@ -362,6 +371,29 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		}
 	}
 	else{
+		/*
+		uint16_t k;
+		for(i=0; i<h; i++){
+			for(j=0; j<w; j++){
+				
+				if(data[i*w+j]<MAX_RANGE){
+					for(k=0; k<data[i*w+j]; k++)
+						grid[k][i][j] = FREE;
+					
+					grid[data[i*w+j]][i][j] = OBSTACLE;
+				
+					for(k=data[i*w+j]+1; k<MAX_RANGE; k++)
+						grid[k][i][j] = UKNOWN;
+				}
+				else{
+					for(k=0; k<MAX_RANGE; k++)
+						grid[k][i][j] = FREE;
+				}
+			}
+		}*/
+		// The grid is indexed plane by plane, facing the camera
+		// We can do model recognition plane by plane
+	
 		#define NEW_CLUSTER(INDEX_I,INDEX_J) nb_clusters++;\
 											 cluster_num[INDEX_I*w+INDEX_J] = n;\
 											 clusters[n].size = 1;\
@@ -372,8 +404,8 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 											 clusters[n].dist = data[INDEX_I*w+INDEX_J];\
 											 n++;
 	
-		#define IS_IN_BACKGROUND(INDEX) (abs(data[INDEX] - background[INDEX]) < STATIC_THRESHOLD || data[INDEX]==0)
-	
+		#define IS_IN_BACKGROUND(INDEX) (abs(data[INDEX] - background[INDEX]) < STATIC_THRESHOLD || data[INDEX]==0 || data[INDEX]>MAX_RANGE)
+		
 		uint16_t x,y;
 		uint16_t nb_clusters=0;
 		uint16_t n = 1;	// start at 1, 0 is for static points (equals to background)
