@@ -98,6 +98,7 @@ geometry_msgs::Point depth_to_cartesian(int x, int y, uint16_t depth){
 	return p;
 }
 
+// Read the image and compute the points of interest of the robot
 void collect_robot_data(){
 
 	uint32_t i,j;
@@ -153,6 +154,7 @@ static uint16_t distance(const geometry_msgs::Point a, const geometry_msgs::Poin
 	return sqrt(pow((a.x - b.x),2) + pow((a.y - b.y),2) + pow((a.z - b.z),2));
 }
 
+// Check that every person in the room is not to close to the robot
 void check_security_distance(){
 	
 	uint32_t i,j;

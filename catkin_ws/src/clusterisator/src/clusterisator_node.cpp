@@ -36,7 +36,7 @@
 #define DO_OPTI true
 #define T_OPTI 2 // taille du carré d'optimisation
 
-#define CLUSTER_NOISE_SIZE 300	// seems nice to be 1200/(T_OPTI²)
+#define CLUSTER_NOISE_SIZE 50
 
 /*
 #define FREE 0
@@ -223,6 +223,8 @@ void publish_person(const uint16_t cluster_num[], const uint16_t n, const struct
 	uint16_t cluster_robot = 0;
 	
 	// Init robot
+	// TODO recognize the robot
+	// here we just chose a cluster at the center of the image
 	for(i=(4*h)/10; i<(6*h)/10 && cluster_robot == 0; i++)
 		for(j=(4*w)/10; j<(6*w)/10 && cluster_robot == 0; j++)
 			if(cluster_num[i*w+j] != 0 && ! is_a_person(clusters[cluster_num[i*w+j]]))
@@ -350,6 +352,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		for(i=1;i<h-1;i++){
 			for(j=1;j<w-1;j++){
 				// Si le pixel est à 0, c'est du bruit
+				// On le remplace par le pixel non-0 le plus proche
 				if(data[i*w+j] == 0){
 					if(data[(i-1)*w+j] != 0)
 				 		data[i*w+j] = data[(i-1)*w+j];
@@ -372,6 +375,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 	}
 	else{
 		/*
+		// Explicit depth grid
 		uint16_t k;
 		for(i=0; i<h; i++){
 			for(j=0; j<w; j++){
@@ -392,7 +396,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 			}
 		}*/
 		// The grid is indexed plane by plane, facing the camera
-		// We can do model recognition plane by plane
+		// We could do model recognition plane by plane
 	
 		#define NEW_CLUSTER(INDEX_I,INDEX_J) nb_clusters++;\
 											 cluster_num[INDEX_I*w+INDEX_J] = n;\
@@ -527,7 +531,7 @@ void compute_clusterisation(const sensor_msgs::Image::ConstPtr& img){
 		// Suppression du bruit
 		for(i=0;i<h;i++){
 			for(j=0;j<w;j++){
-				// Si le pixel n'a pas de dynamicité, il vire
+				// Si le pixel n'a pas de dynamicité, c'est du bruit
 				if(dynamicness[i*w+j] <= DYNAMICNESS_THRESHOLD){
 				 	clusters[cluster_num[i*w+j]].size --;
 				 	if(clusters[cluster_num[i*w+j]].size == 0)
