@@ -56,11 +56,11 @@ We need a way to perceive the 3D environment in which the robot moves. Using 3D 
 
 \subsubsection{On the robot itself}
 
-In many situations where robots need to perceive their environment (using a perception-decision-action scheme), the sensors are intuitively placed on the robot, as a human got his eyes and ears on himself to perceive its own environment. But there are some robots that cannot handle sensors on their bodies : for example industrial arms that move in every direction cannot give a reliable perception (cf Fig. \ref{fig:robotic_arm}).
+In many situations where robots need to perceive their environment (using a perception-decision-action scheme), the sensors are intuitively placed on the robot, as a human got his eyes and ears on himself to perceive its own environment. But there are some robots that cannot handle sensors on their bodies : for example industrial arms that move in every direction cannot give a reliable perception (cf Fig. \ref{fig:robotic_arm}). Additionally, we want our architecture to work with the robot not broadcasting its position or movements, so we wouldn't be able to correct sensor data with its movements.
 
 \subsubsection{Static sensors}
 
-A different an more reliable way to get informations is to place static sensors. The advantage of this method is that we can use several sensors to cover a wider range in the room, and that without obstructing the robot's or human's movement. It however requires the presence of several sensors, as objects or persons could possibly hide the robot and compromise the availability of reliable information.
+A different and more reliable way to get informations is to place static sensors. The advantage of this method is that we can use several sensors to cover a wider range in the room, and that without obstructing the robot's or human's movement. It however requires the presence of several sensors, as objects or persons could possibly hide the robot and compromise the availability of reliable information. In our case, this it what we will be using.
 
 
 \begin{figure}
@@ -74,45 +74,38 @@ A different an more reliable way to get informations is to place static sensors.
 One of the most used API in the world of robotics is the ROS platform. It works as a set of executables, named nodes, which communicate with messages published on topics. The advantage of this platform is that it provides a standardized API for communicating with autonomous robots. In our case, we present a solution with two nodes, added to the sensor node : the first one will be charged to analyze the data provided by the sensor, identifying moving objects and persons ; the second one will check - from the information given by the first node - that the human security is not compromised.
 Person detection and tracking is a common problem, however the only public ROS node which provided person tracking for the model of camera we are using is not maintained anymore for the newest versions of the platform.
 
-\section{The Clustering node}
-
 \subsection{Sensor data}
 
-\begin{figure}
+We are using low-cost RGB-D cameras, with the OpenNI standard - we are working with the ASUS XTion PRO LIVE model. We are using the openni\_camera node of ROS \cite{Refopenni} to get data as a ROS message. We will be using only depth data for the moment.
+
+\subsubsection{Depth space}
+A depth camera provides data in an implicit depth space (cf Fig. \ref{fig:depth_space}) : a distance is given for each pixel of the image. Posing d as the distance at the pixel (i,j), we get the point (i,j,d) in the depth space with the camera as the origin.
+
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.4\textwidth]{depth_space.png}
 \caption{\label{fig:depth_space}Representation of the Depth space \cite{Ref1}.}
 \end{figure}
 
-We are using low-cost RGB-D cameras, with the OpenNI standard - we are working with the ASUS XTion PRO LIVE model. We are using the openni\_camera node of ROS \cite{Refopenni} to get data as a ROS message.
+\section{Data processing}
 
-\subsubsection{Depth space}
-A depth camera provides data in a implicit depth space (cf Fig. \ref{fig:depth_space}) : a distance is given for each pixel of the image. Posing d as the distance at the pixel (i,j), we get the point (i,j,d) in the depth space with the camera as the origin.
+\subsection{Data processing pipeline}
 
-\subsection{Clustering}
-
-\begin{figure}
+\begin{figure}[H]
 \centering
-\includegraphics[width=0.5\linewidth]{background_02.png}
-\caption{\label{fig:background2}The background stored at the beginning.}
+\includegraphics[width=0.7\linewidth]{pipeline.png}
+\caption{\label{fig:pipeline}The data processing pipeline.}
 \end{figure}
 
-\begin{figure}
-\centering
-\includegraphics[width=0.5\linewidth]{camera_person_01.png}
-\caption{\label{fig:cameraperson1}An image recorded while a person was in the field of view.}
-\end{figure}
-
-\begin{figure}
-\centering
-\includegraphics[width=0.5\linewidth]{clusters_person_01.png}
-\caption{\label{fig:clustersperson1}The separation between static objects (in blue) and moving ones (in red).}
-\end{figure}
+\subsection{Detection of moving objects and persons}
 
 To analyze the data provided by the sensor, we want first want to cut the image in two parts : the static objects (such as walls) and the dynamic, moving ones (cf Fig. \ref{fig:background2}, \ref{fig:cameraperson1}, \ref{fig:clustersperson1}). Existing studies already present person detection with RGB-D sensors, but with some limits, as sometimes persons won't be detected and on the other side static objects such as furniture will be identified as persons. This kind of problem could come from the fact that the camera could be moving.
-In our case, we prefer static cameras along with high reliability detection, as we don't want to compromise security, as well as we don't want to stop the robot when it is too close to the table it is placed on. The static nature of the cameras allows to first store a reference background of the field of view when we start ; it requires the room to be empty of persons or robots. We then compute on each frame the differences between the frame and the background to get the dynamic objects. Afterwards, we want to separate the several objects we identified : it is known as clustering - each object being a cluster (cf Algo. \ref{algo:clustering}). The main challenge of this algorithm is to provide real-time reliable data ; the longest part is the $FuseTopAndLeftClusters()$ function, as the two clusters can be pretty big : a naive approach of re-computing the cluster for the whole image is not possible to stay above 1 frame per second.
+In our case, we prefer static cameras along with high reliability detection, as we don't want to compromise security, as well as we don't want to stop the robot when it is too close to the table it is placed on. The static nature of the cameras allows to first store a reference background of the field of view when we start ; it requires the room to be empty of persons or robots. We then compute on each frame the differences between the frame and the background to get the dynamic objects.
 
-\begin{algorithm}
+\subsection{Clustering}
+ Afterwards, we want to separate the several objects we identified : it is known as clustering - each object being a cluster (cf Algo. \ref{algo:clustering}). The main challenge of this algorithm is to provide real-time reliable data ; the longest part is the $FuseTopAndLeftClusters()$ function, as the two clusters can be pretty big : a naive approach of re-computing the cluster for the whole image is not possible to stay above 1 frame per second.
+
+\begin{algorithm}[H]
 \caption{\label{algo:clustering}3D Clustering : Compute the list of the clusters in the depth image}
 \begin{algorithmic}
 \REQUIRE $img[h][w]$ // the depth image
@@ -142,6 +135,7 @@ In our case, we prefer static cameras along with high reliability detection, as 
 \ENDFOR
 \STATE 
 \STATE // Do the same for the upper line ($j:1 \rightarrow w-1$)
+\STATE // ...
 \STATE 
 \STATE // Compute the rest of the image
 \FOR{$i:1 \rightarrow h-1$}
@@ -167,6 +161,30 @@ In our case, we prefer static cameras along with high reliability detection, as 
 \end{algorithmic}
 \end{algorithm}
 
+\begin{figure*}[t!]
+\centering
+
+  \begin{subfigure}[t]{0.5\textwidth}
+  \centering
+  \includegraphics[width=1.0\linewidth]{background_02.png}
+  \caption{\label{fig:background2}The background stored at the beginning.}
+  \end{subfigure}%
+  ~
+  \begin{subfigure}[t]{0.5\textwidth}
+  \centering
+  \includegraphics[width=1.0\linewidth]{camera_person_01.png}
+  \caption{\label{fig:cameraperson1}An image recorded while a person was in the field of view.}
+  \end{subfigure}
+
+  \begin{subfigure}{0.5\textwidth}
+  \centering
+  \includegraphics[width=1.0\linewidth]{clusters_person_01.png}
+  \caption{\label{fig:clustersperson1}The separation between static objects (in blue) and moving ones (in red).}
+  \end{subfigure}
+  \caption{A simple clustering example.}
+
+\end{figure*}
+
 \subsubsection{Noise minimization}
 
 The cameras we are using are cheap, but it indeed has drawbacks, such as important noise (cf Fig. \ref{fig:camera1}) : these cameras use infra-red projection to get the depth data - cheaper than laser but less effective. We get important noise on these images (the black dots on Fig. \ref{fig:camera1}), often on smooth or glossy surfaces.
@@ -187,7 +205,7 @@ However, there is still noise giving non-zero depth values, especially on far aw
         \includegraphics[height=0.8\textwidth]{background_01.png}
         \caption{\label{fig:background1}The same depth image after noise treatment.}
     \end{subfigure}
-    \caption{Noise suppression}
+    \caption{Noise suppression.}
 \end{figure*}
 
 \begin{figure}
@@ -201,39 +219,47 @@ However, there is still noise giving non-zero depth values, especially on far aw
 Once we separated the several objects in the image, we need to identify persons and robots. In our case persons are identified only with their size - if it is a moving object, around 1m75 tall, and around 50cm wide, it must be a person. This is to be adapted with the situation : if a robot is 1m75 tall, or manipulates objects of this size, we need another method of identification (cf Section \ref{sect:futurework}).
 The identification of the robot induce the same kind of problems and has not been resolved during the internship.
 
-\begin{figure}
+\begin{figure*}[t!]
 \centering
-\includegraphics[width=0.5\linewidth]{camera_03.png}
-\caption{\label{fig:background3}The background stored at the beginning.}
-\end{figure}
 
-\begin{figure}
-\centering
-\includegraphics[width=0.5\linewidth]{camera_person_02.png}
-\caption{\label{fig:cameraperson2}An image recorded while a person, the robot and an object were in the field of view.}
-\end{figure}
+  \begin{subfigure}[t]{0.5\textwidth}
+  \centering
+  \includegraphics[width=1.0\linewidth]{camera_03.png}
+  \caption{\label{fig:background3}The background stored at the beginning.}
+  \end{subfigure}%
+  ~
+  \begin{subfigure}[t]{0.5\textwidth}
+  \centering
+  \includegraphics[width=1.0\linewidth]{camera_person_02.png}
+  \caption{\label{fig:cameraperson2}An image recorded while a person, the robot and an object were in the field of view.}
+  \end{subfigure}
 
-\begin{figure}
-\centering
-\includegraphics[width=0.5\linewidth]{clusters_person_02.png}
-\caption{\label{fig:clustersperson2}The separation between static objects (in blue), moving ones (in green), and persons (in red).}
-\end{figure}
+  \begin{subfigure}{0.5\textwidth}
+  \centering
+  \includegraphics[width=1.0\linewidth]{clusters_person_02.png}
+  \caption{\label{fig:clustersperson2}The separation between static objects (in blue), moving ones (in green), and persons (in red).}
+  \end{subfigure}
+  \caption{A simple identification example.}
 
-\section{The Distance-computing node}
+\end{figure*}
 
-The second node is in charge to compute the distance between each person and the robot. It receives data from the clustering node in the depth space, however distance computing is far easier in a cartesian space (cf Fig. \ref{fig:spaces}), thus we transpose coordinates in this space. The transposition of a point $P_d$ in the depth space to a point $P_c$ in the cartesian space is given by \[{P_c}_x = \frac{({P_d}_x-c_x){P_d}_z}{fs_x}, {P_c}_y = \frac{({P_d}_y-c_y){P_d}_z}{fs_y}, {P_c}_z = {P_d}_z \text{ \cite{Ref1}} \]
+\subsection{Distance computing}
+
+Afterwards, we need to compute the distance between each person and the robot. We are receiving cluster data in the depth space, however distance computing is far easier in a cartesian space (cf Fig. \ref{fig:spaces}), thus we transpose coordinates in this space. The transposition of a point $P_d$ in the depth space to a point $P_c$ in the cartesian space is given by \[{P_c}_x = \frac{({P_d}_x-c_x){P_d}_z}{fs_x}, {P_c}_y = \frac{({P_d}_y-c_y){P_d}_z}{fs_y}, {P_c}_z = {P_d}_z \text{ \cite{Ref1}} \]
 where $f,s_x,s_y,c_x,c_y$ are calibration data from the depth sensor (focal length, size of a pixel and coordinates of the focal axis in the image plane) \cite{Ref1}.
 All it is left to do is to compute the distance between each point of the person and each point of the robot. However, this method leads to very important treatment time (30 seconds per frame when one person is in the field of view). We thus need to reduce the number of points to compute. One way is too first reduce the size of the image, by sampling it - but it could have consequences on precision. An other and more widely used way is to reduce the number of points of the robot to only a sample of points of interest - for example one point at each articulation of the robot. As we know the shape of the robot, we can choose these points in order to ensure the same security. If a person is too close from one of these points, a message is sent to the robot to stop.
 
-\begin{figure}
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.6\textwidth]{depth_cartesian_spaces.png}
 \caption{\label{fig:spaces}Representation of Cartesian space (a) and Depth space (b) \cite{Ref1}.}
 \end{figure}
 
-\section{\label{sect:futurework}Future work perspectives}
+\section{\label{sect:futurework}Conclusion and future work perspectives}
 
+To conclude, we have a full prototype of data-processing, working in small interior pieces - the quality of the sensors restricting its size to around 5x5 meters.
 Model-based identification should be the main improvement to bring to the work done in the internship. It can be done with only depth data (by expliciting the depth grid) or along with the RGB image - however, correspondence between RGB and depth data is reliable only in a range between 1.5 and 4 meters from the camera. This kind of identification will lead to easier sampling of the points of the robot - and eventually the persons, as we may know the global shape and the articulations of a human.
+We could also think about fusing sensor data (cf Article \cite{Ref1}), though it might not be necessary in our context, as independent sensors should be enough to detect if a person is too close.
 
 \begin{thebibliography}{}
 
