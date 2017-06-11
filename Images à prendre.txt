@@ -1,0 +1,7 @@
+
+Personne assise non détectée
+
+Séparation des objets (une personne avec une table derriere par exemple)
+
+Personne proche d'un robot
+ -> warning
